@@ -1367,7 +1367,10 @@ impl ThreadAnalyzer {
             let description = format!(
                 "Lock ordering cycle detected: {} (involving threads: {})",
                 cycle.iter()
-                    .map(|l| format!("0x{:X}", l))
+                    .map(|&l| {
+                        let m = self.sync_mechanism_for(l);
+                        format!("0x{:X} ({:?})", m.addr, m.kind)
+                    })
                     .collect::<Vec<_>>()
                     .join(" → "),
                 threads.iter()
