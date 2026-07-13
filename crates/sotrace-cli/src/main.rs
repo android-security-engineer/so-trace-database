@@ -1272,7 +1272,7 @@ fn print_deadlocks(dl: &[sotrace_engine::analyzer::thread_analyzer::DeadlockRisk
     println!("\n=== Deadlock Risks ({}) ===", dl.len());
     for (i, d) in dl.iter().enumerate() {
         let cycle: Vec<String> = d.lock_cycle.iter()
-            .map(|l| format!("0x{:x}", l)).collect();
+            .map(|m| format!("0x{:x} ({:?})", m.addr, m.kind)).collect();
         let threads: Vec<String> = d.threads.iter().map(|t| format!("T{}", t)).collect();
         println!("  [{}] locks=[{}] threads=[{}]", i, cycle.join(" → "), threads.join(", "));
         println!("       {}", d.description);
@@ -1283,8 +1283,8 @@ fn print_contentions(cs: &[sotrace_engine::analyzer::thread_analyzer::LockConten
     println!("\n=== Lock Contentions ({}) ===", cs.len());
     for (i, c) in cs.iter().enumerate() {
         println!(
-            "  [{}] lock=0x{:x}  acquires={} contended={} ({:.0}%) avg_wait={}ns",
-            i, c.lock_address, c.acquire_count, c.contention_count,
+            "  [{}] lock=0x{:x} ({:?})  acquires={} contended={} ({:.0}%) avg_wait={}ns",
+            i, c.lock_address.addr, c.lock_address.kind, c.acquire_count, c.contention_count,
             c.contention_ratio * 100.0, c.avg_wait_ns
         );
     }
@@ -1404,8 +1404,8 @@ fn print_critical_sections(cs: &[sotrace_engine::analyzer::thread_analyzer::Crit
     for (i, c) in cs.iter().enumerate() {
         let holders: Vec<String> = c.holder_threads.iter().map(|t| format!("T{}", t)).collect();
         println!(
-            "  [{}] lock=0x{:X}  holds={} total={} avg={} max={} (T{} steps {}..{})  holders=[{}]",
-            i, c.lock_address, c.hold_count, c.total_hold_steps, c.avg_hold_steps,
+            "  [{}] lock=0x{:X} ({:?})  holds={} total={} avg={} max={} (T{} steps {}..{})  holders=[{}]",
+            i, c.lock_address.addr, c.lock_address.kind, c.hold_count, c.total_hold_steps, c.avg_hold_steps,
             c.max_hold_steps, c.longest_hold_thread, c.longest_hold_start, c.longest_hold_end,
             holders.join(", ")
         );
@@ -1555,8 +1555,8 @@ mod tests {
             engine.record_sync_event(e.clone()).unwrap();
         }
         let cs = engine.analyze_lock_contention();
-        assert!(cs.iter().any(|c| c.lock_address == LOCK_ADDR));
-        let contended = cs.iter().find(|c| c.lock_address == LOCK_ADDR).unwrap();
+        assert!(cs.iter().any(|c| c.lock_address.addr == LOCK_ADDR));
+        let contended = cs.iter().find(|c| c.lock_address.addr == LOCK_ADDR).unwrap();
         assert_eq!(contended.acquire_count, 2);
         assert_eq!(contended.contention_count, 1);
     }
@@ -1685,7 +1685,8 @@ mod tests {
         let cs = out.get("critical_sections").unwrap().as_array().unwrap();
         assert_eq!(cs.len(), 1);
         let c = &cs[0];
-        assert_eq!(c["lock_address"], 2882338816u64);
+        assert_eq!(c["lock_address"]["addr"], 2882338816u64);
+        assert_eq!(c["lock_address"]["kind"], "Mutex");
         assert_eq!(c["hold_count"], 1);
         assert_eq!(c["total_hold_steps"], 30);
         assert_eq!(c["max_hold_steps"], 30);
@@ -1846,7 +1847,7 @@ mod tests {
         let mut counts = ImportedCounts::default();
         feed_events(&mut engine, &events, &mut counts).unwrap();
         let cs = engine.analyze_lock_contention();
-        assert!(cs.iter().any(|c| c.lock_address == 0xABCD_0000));
+        assert!(cs.iter().any(|c| c.lock_address.addr == 0xABCD_0000));
     }
 
     #[test]

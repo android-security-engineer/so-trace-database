@@ -90,8 +90,8 @@ pub struct RaceCondition {
 /// A detected potential deadlock
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeadlockRisk {
-    /// Locks involved in the cycle (in order)
-    pub lock_cycle: Vec<u64>,
+    /// Locks involved in the cycle (in order), each typed with its primitive kind
+    pub lock_cycle: Vec<SyncMechanism>,
     /// Threads involved in the deadlock
     pub threads: Vec<u32>,
     /// Steps where the lock ordering violation occurred
@@ -103,8 +103,8 @@ pub struct DeadlockRisk {
 /// Lock contention analysis result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LockContentionInfo {
-    /// Lock/mutex address
-    pub lock_address: u64,
+    /// Lock/mutex address, typed with its primitive kind
+    pub lock_address: SyncMechanism,
     /// Total number of acquisitions
     pub acquire_count: u64,
     /// Number of contended acquisitions (had to wait)
@@ -317,8 +317,8 @@ pub struct ThreadStateStats {
 /// contributes nothing (same principle as trailing thread states in #65).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CriticalSectionStats {
-    /// Lock/mutex address
-    pub lock_address: u64,
+    /// Lock/mutex address, typed with its primitive kind
+    pub lock_address: SyncMechanism,
     /// Number of completed hold intervals (acquire matched by a release)
     pub hold_count: u64,
     /// Total steps the lock was held, summed across all completed intervals
@@ -1248,7 +1248,14 @@ impl ThreadAnalyzer {
         }
 
         // Stable output order: sort the reported cycles by their canonical form.
-        deadlocks.sort_by(|a, b| a.lock_cycle.cmp(&b.lock_cycle));
+        // Compare by the address sequence (kind is derived, not a sort key).
+        deadlocks.sort_by(|a, b| {
+            a.lock_cycle
+                .iter()
+                .map(|m| m.addr)
+                .collect::<Vec<_>>()
+                .cmp(&b.lock_cycle.iter().map(|m| m.addr).collect::<Vec<_>>())
+        });
         deadlocks
     }
 
@@ -1370,7 +1377,7 @@ impl ThreadAnalyzer {
             );
 
             results.push(DeadlockRisk {
-                lock_cycle: cycle,
+                lock_cycle: cycle.iter().map(|&a| self.sync_mechanism_for(a)).collect(),
                 threads,
                 violation_steps,
                 description,
@@ -1483,7 +1490,7 @@ impl ThreadAnalyzer {
             contending_threads.sort_unstable();
 
             results.push(LockContentionInfo {
-                lock_address: lock_addr,
+                lock_address: self.sync_mechanism_for(lock_addr),
                 acquire_count,
                 contention_count,
                 contention_ratio,
@@ -1501,7 +1508,7 @@ impl ThreadAnalyzer {
             b.contention_ratio
                 .partial_cmp(&a.contention_ratio)
                 .unwrap_or(std::cmp::Ordering::Equal)
-                .then(a.lock_address.cmp(&b.lock_address))
+                .then(a.lock_address.addr.cmp(&b.lock_address.addr))
         });
 
         results
@@ -1607,7 +1614,7 @@ impl ThreadAnalyzer {
             holder_threads.sort_unstable();
 
             results.push(CriticalSectionStats {
-                lock_address: lock_addr,
+                lock_address: self.sync_mechanism_for(lock_addr),
                 hold_count,
                 total_hold_steps,
                 avg_hold_steps,
@@ -1625,7 +1632,7 @@ impl ThreadAnalyzer {
         results.sort_by(|a, b| {
             b.total_hold_steps
                 .cmp(&a.total_hold_steps)
-                .then(a.lock_address.cmp(&b.lock_address))
+                .then(a.lock_address.addr.cmp(&b.lock_address.addr))
         });
 
         results
@@ -1980,14 +1987,23 @@ impl ThreadAnalyzer {
         lock_usage
             .into_iter()
             .max_by_key(|&(addr, count)| (count, std::cmp::Reverse(addr)))
-            .map(|(addr, _)| SyncMechanism {
-                addr,
-                kind: self
-                    .sync_types_by_addr
-                    .get(&addr)
-                    .copied()
-                    .unwrap_or(SyncPrimitiveKind::Mutex),
-            })
+            .map(|(addr, _)| self.sync_mechanism_for(addr))
+    }
+
+    /// Wrap a sync object address into a typed [`SyncMechanism`], looking up its
+    /// primitive kind in `sync_types_by_addr` (built during `build_indexes`).
+    /// If the address was never recorded (e.g. indexes not yet built, or an
+    /// address that only ever appeared as a non-tallied event), falls back to
+    /// `Mutex` — the most common primitive — so reports are never bare addresses.
+    fn sync_mechanism_for(&self, addr: u64) -> SyncMechanism {
+        SyncMechanism {
+            addr,
+            kind: self
+                .sync_types_by_addr
+                .get(&addr)
+                .copied()
+                .unwrap_or(SyncPrimitiveKind::Mutex),
+        }
     }
 
     /// Summarize per-thread scheduling behavior from the context-switch stream.
@@ -2630,7 +2646,10 @@ mod tests {
 
         let deadlocks = analyzer.detect_deadlocks();
         assert_eq!(deadlocks.len(), 1, "a genuine hold beside failed-trylock noise keeps the deadlock real: {:?}", deadlocks);
-        assert_eq!(deadlocks[0].lock_cycle, vec![a, b]);
+        assert_eq!(
+            deadlocks[0].lock_cycle.iter().map(|m| m.addr).collect::<Vec<_>>(),
+            vec![a, b]
+        );
     }
 
     /// A thread that sequentially re-acquires the SAME lock (lock B, unlock B,
@@ -2665,7 +2684,10 @@ mod tests {
         let deadlocks = analyzer.detect_deadlocks();
         // Exactly the genuine two-lock cycle, no single-lock self-loop.
         assert_eq!(deadlocks.len(), 1, "self-loop must not be reported alongside the real cycle: {:?}", deadlocks);
-        assert_eq!(deadlocks[0].lock_cycle, vec![a, b]);
+        assert_eq!(
+            deadlocks[0].lock_cycle.iter().map(|m| m.addr).collect::<Vec<_>>(),
+            vec![a, b]
+        );
         assert!(
             deadlocks.iter().all(|d| d.lock_cycle.len() >= 2),
             "no single-lock self-cycle may appear: {:?}",
@@ -2703,7 +2725,10 @@ mod tests {
 
         let deadlocks = analyzer.detect_deadlocks();
         assert_eq!(deadlocks.len(), 1, "recursive lock still held after one unlock must keep the deadlock: {:?}", deadlocks);
-        assert_eq!(deadlocks[0].lock_cycle, vec![a, b]);
+        assert_eq!(
+            deadlocks[0].lock_cycle.iter().map(|m| m.addr).collect::<Vec<_>>(),
+            vec![a, b]
+        );
     }
 
     /// Control for the recursive case: once BOTH nesting levels are released, the
@@ -2792,7 +2817,10 @@ mod tests {
 
         let deadlocks = analyzer.detect_deadlocks();
         assert_eq!(deadlocks.len(), 1, "an exclusive-capable lock in the cycle keeps the deadlock real: {:?}", deadlocks);
-        assert_eq!(deadlocks[0].lock_cycle, vec![a, b]);
+        assert_eq!(
+            deadlocks[0].lock_cycle.iter().map(|m| m.addr).collect::<Vec<_>>(),
+            vec![a, b]
+        );
     }
 
     /// A single A↔B lock-order cycle must be reported exactly once, with a
@@ -2823,7 +2851,11 @@ mod tests {
 
         let deadlocks = analyzer.detect_deadlocks();
         assert_eq!(deadlocks.len(), 1, "one cycle must be reported once, got {:?}", deadlocks);
-        assert_eq!(deadlocks[0].lock_cycle, vec![a, b], "cycle must be min-address-first");
+        assert_eq!(
+            deadlocks[0].lock_cycle.iter().map(|m| m.addr).collect::<Vec<_>>(),
+            vec![a, b],
+            "cycle must be min-address-first"
+        );
         assert_eq!(deadlocks[0].threads, vec![1, 2], "threads must be sorted and deduped");
 
         // Deterministic: re-running yields byte-identical output.
@@ -2866,7 +2898,9 @@ mod tests {
         analyzer.feed_sync_event(lock(51, 5, a));
 
         let mut cycles: Vec<Vec<u64>> =
-            analyzer.detect_deadlocks().into_iter().map(|d| d.lock_cycle).collect();
+            analyzer.detect_deadlocks().into_iter()
+                .map(|d| d.lock_cycle.into_iter().map(|m| m.addr).collect())
+                .collect();
         cycles.sort();
         assert_eq!(
             cycles,
@@ -3291,7 +3325,7 @@ mod tests {
         assert!(!contentions.is_empty());
 
         let mutex_contention = contentions.iter()
-            .find(|c| c.lock_address == mutex_addr)
+            .find(|c| c.lock_address.addr == mutex_addr)
             .unwrap();
         assert_eq!(mutex_contention.acquire_count, 2);
         assert!(mutex_contention.contention_count >= 1);
@@ -3318,13 +3352,13 @@ mod tests {
         analyzer.feed_sync_event(ev(20, 1, lock_addr, SyncEventType::MutexUnlock));
 
         let cs = analyzer.analyze_critical_sections();
-        let cs_lock = cs.iter().find(|c| c.lock_address == lock_addr).unwrap();
+        let cs_lock = cs.iter().find(|c| c.lock_address.addr == lock_addr).unwrap();
         assert_eq!(cs_lock.hold_count, 1, "MutexLocked+Unlock is one hold interval");
         assert_eq!(cs_lock.max_hold_steps, 10);
         assert_eq!(cs_lock.holder_threads, vec![1]);
 
         let ct = analyzer.analyze_lock_contention();
-        let ct_lock = ct.iter().find(|c| c.lock_address == lock_addr).unwrap();
+        let ct_lock = ct.iter().find(|c| c.lock_address.addr == lock_addr).unwrap();
         assert_eq!(ct_lock.acquire_count, 1, "MutexLocked counts as an acquisition");
     }
 
@@ -3356,8 +3390,8 @@ mod tests {
         let contentions = analyzer.analyze_lock_contention();
         assert_eq!(contentions.len(), 2);
         // Equal ratio (1.0 each) → ascending address order: lock_lo before lock_hi.
-        assert_eq!(contentions[0].lock_address, lock_lo);
-        assert_eq!(contentions[1].lock_address, lock_hi);
+        assert_eq!(contentions[0].lock_address.addr, lock_lo);
+        assert_eq!(contentions[1].lock_address.addr, lock_hi);
         // Threads that contended on lock_lo are sorted despite reverse feed.
         assert_eq!(contentions[0].contending_threads, vec![1, 2]);
     }
@@ -3379,6 +3413,27 @@ mod tests {
         }
     }
 
+    /// #111: contention and critical-section reports must type the lock with its
+    /// primitive kind, not a bare address. A futex-backed lock yields kind: Futex
+    /// in both `LockContentionInfo.lock_address` and `CriticalSectionStats.lock_address`.
+    #[test]
+    fn test_contention_and_critical_section_kind_is_futex() {
+        let mut analyzer = ThreadAnalyzer::new();
+        analyzer.feed_thread_info(make_thread_info(1, "t1"));
+        let futex_word = 0xF071_0000u64;
+        // Acquire then release a futex word once → one hold interval + one acquire.
+        analyzer.feed_sync_event(hold_ev(10, 1, futex_word, SyncEventType::FutexWait));
+        analyzer.feed_sync_event(hold_ev(50, 1, futex_word, SyncEventType::FutexWake));
+
+        let contentions = analyzer.analyze_lock_contention();
+        let ct = contentions.iter().find(|c| c.lock_address.addr == futex_word).unwrap();
+        assert_eq!(ct.lock_address.kind, SyncPrimitiveKind::Futex);
+
+        let cs = analyzer.analyze_critical_sections();
+        let cs_lock = cs.iter().find(|c| c.lock_address.addr == futex_word).unwrap();
+        assert_eq!(cs_lock.lock_address.kind, SyncPrimitiveKind::Futex);
+    }
+
     /// A single acquire→release pair yields one hold interval spanning the two
     /// steps, with the span attributed to the holding thread.
     #[test]
@@ -3393,7 +3448,7 @@ mod tests {
         let cs = analyzer.analyze_critical_sections();
         assert_eq!(cs.len(), 1);
         let c = &cs[0];
-        assert_eq!(c.lock_address, lock);
+        assert_eq!(c.lock_address.addr, lock);
         assert_eq!(c.hold_count, 1);
         assert_eq!(c.total_hold_steps, 30);
         assert_eq!(c.avg_hold_steps, 30);
@@ -3484,9 +3539,9 @@ mod tests {
         let cs = analyzer.analyze_critical_sections();
         assert_eq!(cs.len(), 2);
         // Longest aggregate hold first: lock_long (100) before lock_short (20).
-        assert_eq!(cs[0].lock_address, lock_long);
+        assert_eq!(cs[0].lock_address.addr, lock_long);
         assert_eq!(cs[0].total_hold_steps, 100);
-        assert_eq!(cs[1].lock_address, lock_short);
+        assert_eq!(cs[1].lock_address.addr, lock_short);
         assert_eq!(cs[1].hold_count, 2);
         assert_eq!(cs[1].total_hold_steps, 20);
         assert_eq!(cs[1].avg_hold_steps, 10);
@@ -3531,7 +3586,7 @@ mod tests {
         });
 
         let contentions = analyzer.analyze_lock_contention();
-        let info = contentions.iter().find(|c| c.lock_address == lock).unwrap();
+        let info = contentions.iter().find(|c| c.lock_address.addr == lock).unwrap();
         assert_eq!(info.acquire_count, 1);
         assert_eq!(info.contention_count, 1, "waited+timeout must count once, not twice");
         assert!(info.contention_ratio <= 1.0, "ratio must stay within [0,1]: {}", info.contention_ratio);
@@ -3571,8 +3626,8 @@ mod tests {
         });
 
         let contentions = analyzer.analyze_lock_contention();
-        let a = contentions.iter().find(|c| c.lock_address == lock_a).unwrap();
-        let b = contentions.iter().find(|c| c.lock_address == lock_b).unwrap();
+        let a = contentions.iter().find(|c| c.lock_address.addr == lock_a).unwrap();
+        let b = contentions.iter().find(|c| c.lock_address.addr == lock_b).unwrap();
         // lock_a keeps its own 5ms wait → contended; lock_b stays uncontended.
         assert_eq!(a.acquire_count, 1);
         assert_eq!(a.contention_count, 1, "lock_a's own wait must not be lost to a same-step event");
@@ -4516,10 +4571,16 @@ mod tests {
 
         let deadlocks = analyzer.detect_deadlocks();
         assert!(
-            deadlocks.iter().any(|d| d.lock_cycle.contains(&a) && d.lock_cycle.contains(&b)),
+            deadlocks.iter().any(|d| d.lock_cycle.iter().any(|m| m.addr == a) && d.lock_cycle.iter().any(|m| m.addr == b)),
             "semaphore-backed ABBA must be detected: {:?}",
             deadlocks
         );
+        // #111: the cycle's locks are typed — a semaphore-backed deadlock must
+        // report kind: Semaphore on every cycle entry, not bare addresses.
+        let sem_cycle = deadlocks.iter()
+            .find(|d| d.lock_cycle.iter().any(|m| m.addr == a) && d.lock_cycle.iter().any(|m| m.addr == b))
+            .unwrap();
+        assert!(sem_cycle.lock_cycle.iter().all(|m| m.kind == SyncPrimitiveKind::Semaphore));
     }
 
     /// Same ABBA as above but using FutexWait — bionic pthread_mutex/condvar
@@ -4540,10 +4601,16 @@ mod tests {
 
         let deadlocks = analyzer.detect_deadlocks();
         assert!(
-            deadlocks.iter().any(|d| d.lock_cycle.contains(&a) && d.lock_cycle.contains(&b)),
+            deadlocks.iter().any(|d| d.lock_cycle.iter().any(|m| m.addr == a) && d.lock_cycle.iter().any(|m| m.addr == b)),
             "futex-backed ABBA must be detected: {:?}",
             deadlocks
         );
+        // #111: the cycle's locks are typed — a futex-backed deadlock must
+        // report kind: Futex on every cycle entry.
+        let futex_cycle = deadlocks.iter()
+            .find(|d| d.lock_cycle.iter().any(|m| m.addr == a) && d.lock_cycle.iter().any(|m| m.addr == b))
+            .unwrap();
+        assert!(futex_cycle.lock_cycle.iter().all(|m| m.kind == SyncPrimitiveKind::Futex));
     }
 
     /// A semaphore acquire followed by its post must drop the hold depth back
@@ -4598,7 +4665,7 @@ mod tests {
         let cs = analyzer.analyze_critical_sections();
         assert_eq!(cs.len(), 1);
         let c = &cs[0];
-        assert_eq!(c.lock_address, lock);
+        assert_eq!(c.lock_address.addr, lock);
         assert_eq!(c.hold_count, 1);
         assert_eq!(c.max_hold_steps, 40);
         assert_eq!(c.longest_hold_start, 10);
@@ -4619,7 +4686,7 @@ mod tests {
         let cs = analyzer.analyze_critical_sections();
         assert_eq!(cs.len(), 1);
         let c = &cs[0];
-        assert_eq!(c.lock_address, lock);
+        assert_eq!(c.lock_address.addr, lock);
         assert_eq!(c.hold_count, 1);
         assert_eq!(c.max_hold_steps, 40);
         assert_eq!(c.holder_threads, vec![1]);
@@ -4642,7 +4709,7 @@ mod tests {
         let contention = analyzer.analyze_lock_contention();
         assert_eq!(contention.len(), 1);
         let ci = &contention[0];
-        assert_eq!(ci.lock_address, lock);
+        assert_eq!(ci.lock_address.addr, lock);
         assert_eq!(ci.acquire_count, 1);
         assert_eq!(ci.contention_count, 1);
     }

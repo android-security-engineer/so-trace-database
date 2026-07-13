@@ -721,7 +721,7 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         let json: serde_json::Value = serde_json::from_str(&body).unwrap();
         let contentions = json["contentions"].as_array().unwrap();
-        assert!(contentions.iter().any(|c| c["lock_address"] == LOCK_ADDR));
+        assert!(contentions.iter().any(|c| c["lock_address"]["addr"] == LOCK_ADDR));
     }
 
     #[tokio::test]
@@ -896,7 +896,7 @@ mod tests {
         assert_eq!(json["lock_count"], 1);
         let cs = json["critical_sections"].as_array().unwrap();
         assert_eq!(cs.len(), 1);
-        assert_eq!(cs[0]["lock_address"], LOCK_ADDR);
+        assert_eq!(cs[0]["lock_address"]["addr"], LOCK_ADDR);
         assert_eq!(cs[0]["hold_count"], 1);
         assert_eq!(cs[0]["total_hold_steps"], 30);
         assert_eq!(cs[0]["max_hold_steps"], 30);

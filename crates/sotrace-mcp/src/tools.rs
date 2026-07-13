@@ -1649,7 +1649,7 @@ mod tests {
 
         let result = dispatch_tool(&server, "analyze_contentions", &json!({"trace_id": 7})).await.unwrap();
         let contentions = result["contentions"].as_array().unwrap();
-        assert!(contentions.iter().any(|c| c["lock_address"] == LOCK_ADDR));
+        assert!(contentions.iter().any(|c| c["lock_address"]["addr"] == LOCK_ADDR));
     }
 
     #[tokio::test]
@@ -1835,7 +1835,8 @@ mod tests {
         assert_eq!(cs.len(), 1);
         assert_eq!(result["lock_count"], 1);
         let c = &cs[0];
-        assert_eq!(c["lock_address"], LOCK_ADDR);
+        assert_eq!(c["lock_address"]["addr"], LOCK_ADDR);
+        assert_eq!(c["lock_address"]["kind"], "Mutex");
         assert_eq!(c["hold_count"], 1);
         assert_eq!(c["total_hold_steps"], 30);
         assert_eq!(c["max_hold_steps"], 30);
