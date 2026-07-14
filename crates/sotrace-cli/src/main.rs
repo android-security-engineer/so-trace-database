@@ -1331,7 +1331,9 @@ fn print_data_flows(flows: &[sotrace_engine::analyzer::thread_analyzer::ThreadDa
 fn print_producer_consumer(pcs: &[sotrace_engine::analyzer::thread_analyzer::ProducerConsumerPattern]) {
     println!("\n=== Producer-Consumer Patterns ({}) ===", pcs.len());
     for (i, p) in pcs.iter().enumerate() {
-        let addrs: Vec<String> = p.shared_addresses.iter().map(|a| format!("0x{:x}", a)).collect();
+        let addrs: Vec<String> = p.shared_addresses.iter()
+            .map(|a| format!("0x{:x} ({}B, xfer {}B)", a.address, a.access_size, a.overlap_size))
+            .collect();
         // sync_mechanism now carries the primitive kind alongside the address,
         // so the human-readable line reports "0x.. (mutex)" instead of a bare
         // address the reverse engineer would have to cross-reference manually.

@@ -843,6 +843,12 @@ mod tests {
             .unwrap();
         assert_eq!(pc["sync_mechanism"]["addr"], LOCK_ADDR);
         assert_eq!(pc["sync_mechanism"]["kind"], "Mutex");
+        // #116: shared_addresses entries are objects with address + sizes
+        let slots = pc["shared_addresses"].as_array().unwrap();
+        assert!(!slots.is_empty(), "shared_addresses must list the slots");
+        let slot = slots.iter().find(|s| s["address"] == 0x6000).unwrap();
+        assert_eq!(slot["access_size"], 4);
+        assert_eq!(slot["overlap_size"], 4);
     }
 
     #[tokio::test]
