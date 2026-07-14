@@ -233,6 +233,25 @@ pub struct SyncMechanism {
     pub kind: SyncPrimitiveKind,
 }
 
+/// A shared-memory slot used by a producer-consumer pair. Richer than a bare
+/// `u64` address: it also reports the access size (how many bytes the producer
+/// writes per cycle) and the precise transferred range, so an RE can tell
+/// whether the slot carries a single field or an entire struct. Derived from
+/// the underlying `ThreadDataFlow`s; when the same slot is used across multiple
+/// cycles with differing sizes, the first cycle's values are kept (consistent
+/// with the address-level deduplication of `shared_addresses`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SharedAddress {
+    /// Write base address of the slot (page-aligned). The dedup key for
+    /// `shared_addresses`: each distinct slot appears once.
+    pub address: u64,
+    /// Byte size of the producer's write to this slot (1, 2, 4, 8, …).
+    pub access_size: u64,
+    /// Length in bytes of the precise transferred range (the write/read
+    /// overlap) for this slot. From the first cycle's flow.
+    pub overlap_size: u64,
+}
+
 /// Producer-consumer pattern detection result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProducerConsumerPattern {
@@ -240,8 +259,10 @@ pub struct ProducerConsumerPattern {
     pub producer_thread: u32,
     /// Consumer thread
     pub consumer_thread: u32,
-    /// Shared memory addresses used for communication
-    pub shared_addresses: Vec<u64>,
+    /// Shared memory slots used for communication, each typed with its
+    /// address, access size, and transferred range. Sorted by address for
+    /// deterministic output; each distinct slot appears once.
+    pub shared_addresses: Vec<SharedAddress>,
     /// Number of produce-consume cycles detected
     pub cycle_count: u64,
     /// Average time between produce and consume (in steps)
@@ -1991,12 +2012,20 @@ impl ThreadAnalyzer {
             // the same slot every cycle, so the raw per-flow list repeats the
             // address once per cycle; report each address once, sorted for
             // deterministic output. `cycle_count` (below) still reflects the
-            // number of produce-consume cycles, not the address count.
-            let mut shared_addresses: Vec<u64> = group_flows.iter()
-                .map(|f| f.address)
+            // number of produce-consume cycles, not the address count. Each
+            // slot also carries the access size and transferred range from the
+            // first cycle's flow (#116 — same slot keeps one size in practice).
+            let mut shared_addresses: Vec<SharedAddress> = group_flows.iter()
+                .map(|f| SharedAddress {
+                    address: f.address,
+                    access_size: f.write_size,
+                    overlap_size: f.overlap_size,
+                })
                 .collect();
-            shared_addresses.sort_unstable();
-            shared_addresses.dedup();
+            // Dedup by address: keep the first occurrence per slot. A stable
+            // sort by address groups duplicates, then dedup_by on address.
+            shared_addresses.sort_by_key(|s| s.address);
+            shared_addresses.dedup_by(|a, b| a.address == b.address);
 
             // Compute average latency
             let total_latency: u64 = group_flows.iter()
@@ -4122,8 +4151,44 @@ mod tests {
             })
         );
         // Both cycles reuse slot 0x5000, so the distinct shared-address set is a
-        // single entry even though cycle_count is 2.
-        assert_eq!(pc.shared_addresses, vec![0x5000]);
+        // single entry even though cycle_count is 2. Each slot carries its
+        // access size and transferred range (#116).
+        assert_eq!(
+            pc.shared_addresses,
+            vec![SharedAddress { address: 0x5000, access_size: 4, overlap_size: 4 }]
+        );
+    }
+
+    /// #116: shared_addresses reports access_size and overlap_size per slot,
+    /// not just the bare address. A slot written 8B and read 8B with a 4B
+    /// overlap (partial) reports access_size=8, overlap_size=4.
+    #[test]
+    fn test_producer_consumer_shared_address_carries_sizes() {
+        let mut analyzer = ThreadAnalyzer::new();
+        analyzer.feed_thread_info(make_thread_info(1, "producer"));
+        analyzer.feed_thread_info(make_thread_info(2, "consumer"));
+        let mutex_addr = 0xABCD0000;
+        // Two cycles on slot 0x5000: write 8B, read 8B at +4 (4B overlap).
+        for &(ws, rs) in &[(100u64, 200u64), (300, 400)] {
+            analyzer.feed_memory_write(ws, 1, 0x5000, 8);
+            analyzer.feed_sync_event(ThreadSyncEvent {
+                step: ws + 10, thread_id: 1, sync_type: SyncEventType::MutexUnlock,
+                sync_object_addr: mutex_addr, result: SyncResult::Success, wait_duration_ns: None,
+            });
+            analyzer.feed_sync_event(ThreadSyncEvent {
+                step: rs - 10, thread_id: 2, sync_type: SyncEventType::MutexLock,
+                sync_object_addr: mutex_addr, result: SyncResult::Success, wait_duration_ns: Some(1000),
+            });
+            analyzer.feed_memory_read(rs, 2, 0x5004, 8);
+        }
+        let pcs = analyzer.detect_producer_consumer();
+        assert_eq!(pcs.len(), 1);
+        let pc = &pcs[0];
+        assert_eq!(pc.shared_addresses.len(), 1);
+        let slot = &pc.shared_addresses[0];
+        assert_eq!(slot.address, 0x5000);
+        assert_eq!(slot.access_size, 8);
+        assert_eq!(slot.overlap_size, 4);
     }
 
     /// When two locks are used the same number of times by the thread pair,
