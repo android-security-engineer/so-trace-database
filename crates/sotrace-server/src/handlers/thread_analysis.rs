@@ -626,6 +626,9 @@ mod tests {
         assert!(stats["lock_acquire_count"].is_u64());
         assert!(stats["lock_release_count"].is_u64());
         assert_eq!(stats["lock_release_count"], 0);
+        // #118: max_lock_wait_ns is null (seed acquires had no real wait) but
+        // present as a field.
+        assert!(stats["max_lock_wait_ns"].is_null());
     }
 
     #[tokio::test]

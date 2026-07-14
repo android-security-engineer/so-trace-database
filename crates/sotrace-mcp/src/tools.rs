@@ -1494,6 +1494,8 @@ mod tests {
         let stats = &result["stats"].as_array().unwrap()[0];
         assert!(stats["lock_acquire_count"].is_u64());
         assert!(stats["lock_release_count"].is_u64());
+        // #118: max_lock_wait_ns is null (seed acquires had no real wait) but present.
+        assert!(stats["max_lock_wait_ns"].is_null());
     }
 
     #[tokio::test]

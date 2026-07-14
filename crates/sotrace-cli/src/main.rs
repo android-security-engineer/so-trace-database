@@ -1933,6 +1933,8 @@ mod tests {
         let t1_stats = engine.get_thread_stats(1).unwrap();
         assert_eq!(t1_stats.lock_acquire_count, 1);
         assert_eq!(t1_stats.lock_release_count, 0);
+        // #118: max_lock_wait_ns is None — the seed acquire had no real wait.
+        assert_eq!(t1_stats.max_lock_wait_ns, None);
         // Thread 1's sync events include the MutexLock at step 3.
         let sync = engine.query_thread_sync_events(1, 0, u64::MAX);
         assert_eq!(sync.len(), 1);
