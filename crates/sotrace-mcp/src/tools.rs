@@ -83,11 +83,12 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "list_threads",
-            "description": "List all threads in a trace with metadata.",
+            "description": "List all threads in a trace with metadata. Set include_stats=true to also return per-thread statistics (lock acquire/release counts, contentions, etc.) alongside the thread metadata.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "trace_id": { "type": "integer" },
+                    "include_stats": { "type": "boolean", "default": false, "description": "If true, include a top-level `stats` array of ThreadStats (lock_acquire_count, lock_release_count, contention, …) alongside `threads`." }
                 },
                 "required": ["trace_id"]
             }
@@ -691,6 +692,7 @@ async fn tool_list_traces(server: &McpServer) -> Result<Value, ToolError> {
 
 async fn tool_list_threads(server: &McpServer, args: &Value) -> Result<Value, ToolError> {
     let trace_id = get_trace_id(args)?;
+    let include_stats = args.get("include_stats").and_then(|v| v.as_bool()).unwrap_or(false);
     let engine = server.get_or_create_engine(trace_id).await;
     let engine = engine.lock().await;
 
@@ -700,11 +702,21 @@ async fn tool_list_threads(server: &McpServer, args: &Value) -> Result<Value, To
         .map(|info| serde_json::to_value(&info).unwrap_or(Value::Null))
         .collect();
 
-    Ok(json!({
+    // #115: mirror HTTP's `?include_stats=true` so the MCP path can surface
+    // ThreadStats (lock_acquire_count / lock_release_count / …) — keeping the
+    // three access paths (CLI / HTTP / MCP) symmetric. Default false preserves
+    // the prior response shape for callers that don't request stats.
+    let mut response = serde_json::json!({
         "trace_id": trace_id,
         "thread_count": threads.len(),
         "threads": threads,
-    }))
+    });
+    if include_stats {
+        response["stats"] = serde_json::to_value(engine.all_thread_stats())
+            .unwrap_or(serde_json::Value::Null);
+    }
+
+    Ok(response)
 }
 
 async fn tool_query_instructions(server: &McpServer, args: &Value) -> Result<Value, ToolError> {
@@ -1462,6 +1474,26 @@ mod tests {
             .collect();
         assert!(names.contains(&"worker-1"));
         assert!(names.contains(&"worker-2"));
+    }
+
+    /// #115: list_threads with include_stats=true surfaces ThreadStats
+    /// (lock_acquire_count / lock_release_count / …), matching HTTP's
+    /// `?include_stats=true`. Without the flag, `stats` is absent.
+    #[tokio::test]
+    async fn test_list_threads_include_stats() {
+        let server = McpServer::new();
+        import_test_data(&server).await;
+
+        // Without the flag: no stats key in the response.
+        let result = dispatch_tool(&server, "list_threads", &json!({"trace_id": 7})).await.unwrap();
+        assert!(result.get("stats").is_none(), "stats should be absent without include_stats");
+
+        // With include_stats=true: stats array present, with #114's fields.
+        let result = dispatch_tool(&server, "list_threads", &json!({"trace_id": 7, "include_stats": true})).await.unwrap();
+        assert!(result["stats"].is_array(), "stats should be present when include_stats=true");
+        let stats = &result["stats"].as_array().unwrap()[0];
+        assert!(stats["lock_acquire_count"].is_u64());
+        assert!(stats["lock_release_count"].is_u64());
     }
 
     #[tokio::test]
