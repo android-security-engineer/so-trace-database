@@ -433,6 +433,13 @@ pub struct JniBoundaryStats {
     /// Distinct Java methods involved, formatted `class.method` (sorted). These
     /// are the Java-side endpoints — call targets for J2N, callbacks for N2J.
     pub java_methods: Vec<String>,
+    /// Step (seq) of the thread's first JNI boundary crossing. `None` when the
+    /// thread has no recorded crossings (attached-but-idle, or no crossings
+    /// captured). Locates the initialization phase for an RE.
+    pub first_crossing_step: Option<u64>,
+    /// Step (seq) of the thread's last JNI boundary crossing. `None` when the
+    /// thread has no recorded crossings. Locates the teardown / final callback.
+    pub last_crossing_step: Option<u64>,
 }
 
 /// Comprehensive thread analysis result
@@ -1749,10 +1756,18 @@ impl ThreadAnalyzer {
             n2j: u64,
             native_addrs: HashSet<u64>,
             java_methods: HashSet<String>,
+            first_step: Option<u64>,
+            last_step: Option<u64>,
         }
         impl Acc {
             fn new() -> Self {
-                Acc { total: 0, j2n: 0, n2j: 0, native_addrs: HashSet::new(), java_methods: HashSet::new() }
+                Acc {
+                    total: 0, j2n: 0, n2j: 0,
+                    native_addrs: HashSet::new(),
+                    java_methods: HashSet::new(),
+                    first_step: None,
+                    last_step: None,
+                }
             }
         }
 
@@ -1770,6 +1785,13 @@ impl ThreadAnalyzer {
             for call in calls {
                 let acc = per_thread.entry(call.thread_id).or_insert_with(Acc::new);
                 acc.total += 1;
+                // Record first/last crossing step. jni_calls is a BTreeMap<seq,
+                // Vec> iterated in ascending seq order, so the first call we
+                // see for a thread is its globally-earliest crossing.
+                if acc.first_step.is_none() {
+                    acc.first_step = Some(call.seq);
+                }
+                acc.last_step = Some(call.seq);
                 match call.direction {
                     JNICallDirection::JavaToNative => acc.j2n += 1,
                     JNICallDirection::NativeToJava => acc.n2j += 1,
@@ -1801,6 +1823,8 @@ impl ThreadAnalyzer {
                     native_addresses,
                     native_functions,
                     java_methods,
+                    first_crossing_step: acc.first_step,
+                    last_crossing_step: acc.last_step,
                 }
             })
             .collect();
@@ -4830,6 +4854,9 @@ mod tests {
         // 0x2000 appears twice → distinct set keeps it once.
         assert_eq!(s.native_addresses, vec![0x2000, 0x3000]);
         assert_eq!(s.java_methods, vec!["com.app.Bar.callback", "com.app.Foo.doWork", "com.app.Foo.init"]);
+        // #119: first/last crossing step locate the JNI activity window.
+        assert_eq!(s.first_crossing_step, Some(10));
+        assert_eq!(s.last_crossing_step, Some(30));
     }
 
     /// A thread the runtime marked JNI-attached but with no captured crossings
@@ -4848,6 +4875,41 @@ mod tests {
         assert_eq!(stats[0].total_crossings, 0);
         assert!(stats[0].native_addresses.is_empty());
         assert!(stats[0].java_methods.is_empty());
+        // #119: no crossings → no first/last step.
+        assert_eq!(stats[0].first_crossing_step, None);
+        assert_eq!(stats[0].last_crossing_step, None);
+    }
+
+    /// #119: first/last_crossing_step locate the JNI activity window. A thread
+    /// with crossings at seq 50, 120, 300 reports first=50, last=300.
+    #[test]
+    fn test_jni_boundary_first_last_crossing_step() {
+        let mut analyzer = ThreadAnalyzer::new();
+        analyzer.feed_thread_info(make_thread_info(1, "jni-worker"));
+        analyzer.feed_jni_call(make_jni_call(50, 1, JNICallDirection::JavaToNative, "C", "m", 0x2000));
+        analyzer.feed_jni_call(make_jni_call(120, 1, JNICallDirection::NativeToJava, "C", "cb", 0x0));
+        analyzer.feed_jni_call(make_jni_call(300, 1, JNICallDirection::JavaToNative, "C", "m2", 0x3000));
+        let stats = analyzer.analyze_jni_boundary();
+        let s = &stats[0];
+        assert_eq!(s.thread_id, 1);
+        assert_eq!(s.total_crossings, 3);
+        assert_eq!(s.first_crossing_step, Some(50));
+        assert_eq!(s.last_crossing_step, Some(300));
+    }
+
+    /// #119: when crossings are fed out of seq order, first/last still reflect
+    /// the globally-earliest/latest seq (jni_calls is BTreeMap-keyed by seq).
+    #[test]
+    fn test_jni_boundary_first_last_resilient_to_feed_order() {
+        let mut analyzer = ThreadAnalyzer::new();
+        analyzer.feed_thread_info(make_thread_info(1, "jni-worker"));
+        // Feed latest-first; the BTreeMap must still surface first=10, last=300.
+        analyzer.feed_jni_call(make_jni_call(300, 1, JNICallDirection::JavaToNative, "C", "m3", 0x4000));
+        analyzer.feed_jni_call(make_jni_call(10, 1, JNICallDirection::JavaToNative, "C", "m1", 0x2000));
+        analyzer.feed_jni_call(make_jni_call(120, 1, JNICallDirection::NativeToJava, "C", "cb", 0x0));
+        let s = &analyzer.analyze_jni_boundary()[0];
+        assert_eq!(s.first_crossing_step, Some(10));
+        assert_eq!(s.last_crossing_step, Some(300));
     }
 
     /// Two JNI calls at the SAME seq on different threads must both be retained
