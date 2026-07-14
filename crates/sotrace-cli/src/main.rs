@@ -1922,6 +1922,11 @@ mod tests {
         assert_eq!(ids, vec![1, 2]);
         // Each has stats.
         assert_eq!(engine.all_thread_stats().len(), 2);
+        // #114: lock_release_count is present; the seed only has a MutexLock
+        // acquire (no unlock), so thread 1 shows acquire=1, release=0.
+        let t1_stats = engine.get_thread_stats(1).unwrap();
+        assert_eq!(t1_stats.lock_acquire_count, 1);
+        assert_eq!(t1_stats.lock_release_count, 0);
         // Thread 1's sync events include the MutexLock at step 3.
         let sync = engine.query_thread_sync_events(1, 0, u64::MAX);
         assert_eq!(sync.len(), 1);

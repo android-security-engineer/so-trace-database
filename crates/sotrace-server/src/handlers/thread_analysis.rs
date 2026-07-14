@@ -619,6 +619,13 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         let json: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert!(json["stats"].is_array(), "stats should be present when include_stats=true");
+        // #114: lock_release_count is present alongside lock_acquire_count.
+        // make_app seeds two MutexLock acquires and no unlock → release_count 0,
+        // acquire_count 2 (acquire ≫ release would flag a leak).
+        let stats = &json["stats"].as_array().unwrap()[0];
+        assert!(stats["lock_acquire_count"].is_u64());
+        assert!(stats["lock_release_count"].is_u64());
+        assert_eq!(stats["lock_release_count"], 0);
     }
 
     #[tokio::test]
