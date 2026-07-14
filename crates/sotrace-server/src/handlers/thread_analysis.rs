@@ -712,6 +712,12 @@ mod tests {
         assert!(json["races"].is_array());
         // Thread 1 wrote at step 5, thread 2 read at step 7 with no sync → race
         assert!(!json["races"].as_array().unwrap().is_empty(), "should detect a race");
+        // #112: access sizes and overlap range are present in the JSON
+        let race = &json["races"].as_array().unwrap()[0];
+        assert!(race["first_access_size"].is_u64());
+        assert!(race["second_access_size"].is_u64());
+        assert!(race["overlap_address"].is_u64());
+        assert!(race["overlap_size"].is_u64());
     }
 
     #[tokio::test]

@@ -1261,9 +1261,10 @@ fn print_races(races: &[sotrace_engine::analyzer::thread_analyzer::RaceCondition
         let first = if r.first_is_write { "write" } else { "read" };
         let second = if r.second_is_write { "write" } else { "read" };
         println!(
-            "  [{}] addr=0x{:x}  T{} {} @ step {}  →  T{} {} @ step {}",
-            i, r.address, r.first_thread, first, r.first_step,
-            r.second_thread, second, r.second_step
+            "  [{}] addr=0x{:x}  T{} {} ({}B) @ step {}  →  T{} {} ({}B) @ step {}  conflict=0x{:x}+{}B",
+            i, r.address, r.first_thread, first, r.first_access_size, r.first_step,
+            r.second_thread, second, r.second_access_size, r.second_step,
+            r.overlap_address, r.overlap_size,
         );
     }
 }
@@ -1543,6 +1544,8 @@ mod tests {
         let races = engine.detect_race_conditions();
         assert!(!races.is_empty(), "should detect at least one race");
         assert!(races.iter().any(|r| r.address == 4096));
+        // #112: sizes + conflict range present
+        assert!(races.iter().any(|r| r.overlap_address == 4096 && r.overlap_size > 0));
     }
 
     #[test]
@@ -1835,6 +1838,8 @@ mod tests {
         assert!(!races.is_empty(), "should detect the cross-thread race");
         // The race address should be the SO-relative offset 0x1000
         assert!(races.iter().any(|r| r.address == 0x1000));
+        // #112: sizes + conflict range present
+        assert!(races.iter().any(|r| r.overlap_address == 0x1000 && r.overlap_size > 0));
     }
 
     #[test]

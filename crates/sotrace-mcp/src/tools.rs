@@ -1602,6 +1602,12 @@ mod tests {
         assert!(result["race_count"].as_u64().unwrap() >= 1);
         assert!(result["races"].as_array().unwrap().iter()
             .any(|r| r["address"] == 0x1000));
+        // #112: access sizes and overlap range are present in the JSON
+        let race = &result["races"].as_array().unwrap()[0];
+        assert!(race["first_access_size"].is_u64());
+        assert!(race["second_access_size"].is_u64());
+        assert!(race["overlap_address"].is_u64());
+        assert!(race["overlap_size"].is_u64());
     }
 
     #[tokio::test]
