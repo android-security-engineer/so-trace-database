@@ -67,7 +67,9 @@ use sotrace_core::models::jni_call::{JNICall, JNICallDirection};
 /// A detected race condition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RaceCondition {
-    /// Memory address where the race occurred (page-aligned)
+    /// Memory address where the race occurred (page-aligned base of the first
+    /// access). Kept for backwards compatibility; the *precise* conflict region
+    /// is in `overlap_address`/`overlap_size`.
     pub address: u64,
     /// Step of the first access (write)
     pub first_step: u64,
@@ -81,6 +83,19 @@ pub struct RaceCondition {
     pub first_is_write: bool,
     /// Whether the second access was a write
     pub second_is_write: bool,
+    /// Byte size of the first access (1, 2, 4, 8, …). Lets the RE judge whether
+    /// the conflict is a single field or an entire struct.
+    pub first_access_size: u64,
+    /// Byte size of the second access.
+    pub second_access_size: u64,
+    /// Start address of the *actual* overlapping byte range between the two
+    /// accesses (the intersection of `[a, a+a_size)` and `[b, b+b_size)`). This
+    /// is the precise set of contended bytes — not page-aligned, not an
+    /// approximation. Saturating arithmetic keeps it safe near `u64::MAX`.
+    pub overlap_address: u64,
+    /// Length in bytes of the overlapping range (`overlap_size` bytes starting
+    /// at `overlap_address`). Zero only if the two accesses are degenerate.
+    pub overlap_size: u64,
     /// Confidence level (0.0-1.0)
     pub confidence: f64,
     /// Description of the race condition
@@ -927,6 +942,10 @@ impl ThreadAnalyzer {
                         *w_tid, r_tid, *w_step, r_step,
                     );
 
+                    // first=write [w_addr, w_end), second=read [r_addr, r_end)
+                    let overlap_address = (*w_addr).max(r_addr);
+                    let overlap_end = w_end.min(r_end);
+                    let overlap_size = overlap_end.saturating_sub(overlap_address);
                     races.push(RaceCondition {
                         address: *w_addr,
                         first_step: *w_step,
@@ -935,10 +954,15 @@ impl ThreadAnalyzer {
                         second_thread: r_tid,
                         first_is_write: true,
                         second_is_write: false,
+                        first_access_size: *w_size as u64,
+                        second_access_size: r_size as u64,
+                        overlap_address,
+                        overlap_size,
                         confidence,
                         description: format!(
-                            "Thread {} wrote to 0x{:X} at step {}, then thread {} read at step {} without synchronization",
-                            w_tid, w_addr, w_step, r_tid, r_step
+                            "Thread {} wrote {} bytes at 0x{:X} (step {}), then thread {} read {} bytes at 0x{:X} (step {}) without synchronization; conflict range 0x{:X}-0x{:X} ({} bytes)",
+                            w_tid, w_size, w_addr, w_step, r_tid, r_size, r_addr, r_step,
+                            overlap_address, overlap_end, overlap_size,
                         ),
                     });
                 }
@@ -967,6 +991,10 @@ impl ThreadAnalyzer {
                         *w_tid, w2_tid, *w_step, w2_step,
                     );
 
+                    // first=write1 [w_addr, w_end), second=write2 [w2_addr, w2_end)
+                    let overlap_address = (*w_addr).max(w2_addr);
+                    let overlap_end = w_end.min(w2_end);
+                    let overlap_size = overlap_end.saturating_sub(overlap_address);
                     races.push(RaceCondition {
                         address: *w_addr,
                         first_step: *w_step,
@@ -975,10 +1003,15 @@ impl ThreadAnalyzer {
                         second_thread: w2_tid,
                         first_is_write: true,
                         second_is_write: true,
+                        first_access_size: *w_size as u64,
+                        second_access_size: w2_size as u64,
+                        overlap_address,
+                        overlap_size,
                         confidence: confidence * 0.8, // Write-write slightly less severe
                         description: format!(
-                            "Thread {} wrote to 0x{:X} at step {}, then thread {} wrote at step {} without synchronization",
-                            w_tid, w_addr, w_step, w2_tid, w2_step
+                            "Thread {} wrote {} bytes at 0x{:X} (step {}), then thread {} wrote {} bytes at 0x{:X} (step {}) without synchronization; conflict range 0x{:X}-0x{:X} ({} bytes)",
+                            w_tid, w_size, w_addr, w_step, w2_tid, w2_size, w2_addr, w2_step,
+                            overlap_address, overlap_end, overlap_size,
                         ),
                     });
                 }
@@ -1008,6 +1041,10 @@ impl ThreadAnalyzer {
                         r_tid, *w_tid, r_step, *w_step,
                     );
 
+                    // first=read [r_addr, r_end), second=write [w_addr, w_end)
+                    let overlap_address = r_addr.max(*w_addr);
+                    let overlap_end = r_end.min(w_end);
+                    let overlap_size = overlap_end.saturating_sub(overlap_address);
                     races.push(RaceCondition {
                         address: *w_addr,
                         first_step: r_step,
@@ -1016,10 +1053,15 @@ impl ThreadAnalyzer {
                         second_thread: *w_tid,
                         first_is_write: false,
                         second_is_write: true,
+                        first_access_size: r_size as u64,
+                        second_access_size: *w_size as u64,
+                        overlap_address,
+                        overlap_size,
                         confidence,
                         description: format!(
-                            "Thread {} read from 0x{:X} at step {}, then thread {} wrote at step {} without synchronization",
-                            r_tid, w_addr, r_step, w_tid, w_step
+                            "Thread {} read {} bytes at 0x{:X} (step {}), then thread {} wrote {} bytes at 0x{:X} (step {}) without synchronization; conflict range 0x{:X}-0x{:X} ({} bytes)",
+                            r_tid, r_size, r_addr, r_step, w_tid, w_size, w_addr, w_step,
+                            overlap_address, overlap_end, overlap_size,
                         ),
                     });
                 }
@@ -2320,6 +2362,89 @@ mod tests {
         assert_eq!(races[0].address, 0x1000);
         assert!(races[0].first_is_write);
         assert!(!races[0].second_is_write);
+        // #112: access sizes and precise conflict range are now reported
+        assert_eq!(races[0].first_access_size, 4);
+        assert_eq!(races[0].second_access_size, 4);
+        assert_eq!(races[0].overlap_address, 0x1000);
+        assert_eq!(races[0].overlap_size, 4);
+    }
+
+    /// #112: when two accesses only partially overlap, the conflict range must
+    /// be the *intersection*, not either access's full span. Thread 1 writes 8
+    /// bytes at 0x5000 (0x5000-0x5007), thread 2 reads 8 bytes at 0x5004
+    /// (0x5004-0x500B) — the real conflict is 0x5004-0x5007 (4 bytes).
+    #[test]
+    fn test_race_partial_overlap_conflict_range() {
+        let mut analyzer = ThreadAnalyzer::new();
+        analyzer.feed_thread_info(make_thread_info(1, "thread-1"));
+        analyzer.feed_thread_info(make_thread_info(2, "thread-2"));
+        analyzer.feed_memory_write(100, 1, 0x5000, 8);
+        analyzer.feed_memory_read(200, 2, 0x5004, 8);
+        let races = analyzer.detect_race_conditions();
+        assert!(!races.is_empty());
+        let r = &races[0];
+        assert_eq!(r.first_access_size, 8);
+        assert_eq!(r.second_access_size, 8);
+        assert_eq!(r.overlap_address, 0x5004);
+        assert_eq!(r.overlap_size, 4);
+    }
+
+    /// #112: write-write race also reports per-access sizes and the overlap.
+    #[test]
+    fn test_write_write_race_reports_access_sizes() {
+        let mut analyzer = ThreadAnalyzer::new();
+        analyzer.feed_thread_info(make_thread_info(1, "thread-1"));
+        analyzer.feed_thread_info(make_thread_info(2, "thread-2"));
+        analyzer.feed_memory_write(100, 1, 0x6000, 4);
+        analyzer.feed_memory_write(200, 2, 0x6000, 8);
+        let races = analyzer.detect_race_conditions();
+        assert!(!races.is_empty());
+        let r = &races[0];
+        assert!(r.first_is_write && r.second_is_write);
+        assert_eq!(r.first_access_size, 4);
+        assert_eq!(r.second_access_size, 8);
+        assert_eq!(r.overlap_address, 0x6000);
+        assert_eq!(r.overlap_size, 4);
+    }
+
+    /// #112: read-then-write race reports the read's real address as first
+    /// access size source, not the write's page-aligned address.
+    #[test]
+    fn test_read_then_write_race_reports_access_sizes() {
+        let mut analyzer = ThreadAnalyzer::new();
+        analyzer.feed_thread_info(make_thread_info(1, "thread-1"));
+        analyzer.feed_thread_info(make_thread_info(2, "thread-2"));
+        analyzer.feed_memory_read(100, 1, 0x7004, 8);
+        analyzer.feed_memory_write(200, 2, 0x7000, 8);
+        let races = analyzer.detect_race_conditions();
+        assert!(!races.is_empty());
+        let r = &races[0];
+        assert!(!r.first_is_write && r.second_is_write);
+        assert_eq!(r.first_access_size, 8);
+        assert_eq!(r.second_access_size, 8);
+        assert_eq!(r.overlap_address, 0x7004);
+        assert_eq!(r.overlap_size, 4);
+    }
+
+    /// #112: accesses near `u64::MAX` must not overflow when computing the
+    /// overlap range (saturating arithmetic, mirroring `reads_overlapping`).
+    /// With saturating end-points, an 8-byte write at `MAX-7` and an 8-byte
+    /// read at `MAX-3` both have their end clamped to `MAX`, so the contended
+    /// region is `[MAX-3, MAX)` = 3 bytes. The point of this test is that the
+    /// computation does not panic/overflow, not the exact count.
+    #[test]
+    fn test_race_overlap_no_overflow_near_u64_max() {
+        let mut analyzer = ThreadAnalyzer::new();
+        analyzer.feed_thread_info(make_thread_info(1, "thread-1"));
+        analyzer.feed_thread_info(make_thread_info(2, "thread-2"));
+        analyzer.feed_memory_write(100, 1, u64::MAX - 7, 8);
+        analyzer.feed_memory_read(200, 2, u64::MAX - 3, 8);
+        let races = analyzer.detect_race_conditions();
+        assert!(!races.is_empty());
+        let r = &races[0];
+        assert_eq!(r.overlap_address, u64::MAX - 3);
+        // Saturating end clamps both ranges to MAX, so overlap is 3 bytes.
+        assert_eq!(r.overlap_size, 3);
     }
 
     #[test]
