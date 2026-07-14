@@ -1320,8 +1320,10 @@ fn print_data_flows(flows: &[sotrace_engine::analyzer::thread_analyzer::ThreadDa
     for (i, f) in flows.iter().enumerate() {
         let sync = if f.is_synchronized { "sync" } else { "unsync" };
         println!(
-            "  [{}] T{} write @ step {}  →  T{} read @ step {}  addr=0x{:x}  [{}]",
-            i, f.from_thread, f.write_step, f.to_thread, f.read_step, f.address, sync
+            "  [{}] T{} write ({}B) @ step {}  →  T{} read ({}B) @ step {}  transfer=0x{:x}+{}B  [{}]",
+            i, f.from_thread, f.write_size, f.write_step,
+            f.to_thread, f.read_size, f.read_step,
+            f.overlap_address, f.overlap_size, sync
         );
     }
 }

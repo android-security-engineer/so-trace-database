@@ -764,6 +764,13 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         let json: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert!(json["data_flows"].is_array());
+        assert!(!json["data_flows"].as_array().unwrap().is_empty(), "should detect a data flow");
+        // #113: transfer sizes and overlap range are present in the JSON
+        let flow = &json["data_flows"].as_array().unwrap()[0];
+        assert!(flow["write_size"].is_u64());
+        assert!(flow["read_size"].is_u64());
+        assert!(flow["overlap_address"].is_u64());
+        assert!(flow["overlap_size"].is_u64());
     }
 
     #[tokio::test]

@@ -1697,6 +1697,12 @@ mod tests {
         assert!(result["data_flows"].is_array());
         assert!(result["data_flows"].as_array().unwrap().iter()
             .any(|f| f["address"] == 0x1000));
+        // #113: transfer sizes and overlap range are present in the JSON
+        let flow = &result["data_flows"].as_array().unwrap()[0];
+        assert!(flow["write_size"].is_u64());
+        assert!(flow["read_size"].is_u64());
+        assert!(flow["overlap_address"].is_u64());
+        assert!(flow["overlap_size"].is_u64());
     }
 
     #[tokio::test]
