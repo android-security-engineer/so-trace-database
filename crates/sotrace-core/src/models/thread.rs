@@ -428,6 +428,12 @@ pub struct ThreadStats {
     pub lock_contention_count: u64,
     /// Average lock wait duration (in nanoseconds)
     pub avg_lock_wait_ns: Option<u64>,
+    /// Maximum single lock-wait duration in nanoseconds (across all of this
+    /// thread's contended acquisitions that actually waited). `None` if the
+    /// thread never waited on a lock. Surfaces the long tail that
+    /// `avg_lock_wait_ns` hides — one pathological stall among many fast
+    /// acquisitions is the real bottleneck for an RE.
+    pub max_lock_wait_ns: Option<u64>,
     /// Number of functions called by this thread
     pub function_call_count: u64,
 }

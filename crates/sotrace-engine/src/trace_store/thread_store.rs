@@ -111,6 +111,8 @@ struct ThreadStatsBuilder {
     lock_release_count: u64,
     lock_contention_count: u64,
     lock_wait_total_ns: u64,
+    /// Max single wait, tracked alongside the running total.
+    max_lock_wait_ns: u64,
     function_call_count: u64,
 }
 
@@ -124,6 +126,7 @@ impl ThreadStatsBuilder {
             lock_release_count: 0,
             lock_contention_count: 0,
             lock_wait_total_ns: 0,
+            max_lock_wait_ns: 0,
             function_call_count: 0,
         }
     }
@@ -131,6 +134,13 @@ impl ThreadStatsBuilder {
     fn build(&self, thread_id: u32) -> ThreadStats {
         let avg_lock_wait_ns = if self.lock_contention_count > 0 {
             Some(self.lock_wait_total_ns / self.lock_contention_count)
+        } else {
+            None
+        };
+        // max is only meaningful when the thread actually waited at least once;
+        // mirror avg's None-when-no-contention semantics.
+        let max_lock_wait_ns = if self.max_lock_wait_ns > 0 {
+            Some(self.max_lock_wait_ns)
         } else {
             None
         };
@@ -145,6 +155,7 @@ impl ThreadStatsBuilder {
             lock_release_count: self.lock_release_count,
             lock_contention_count: self.lock_contention_count,
             avg_lock_wait_ns,
+            max_lock_wait_ns,
             function_call_count: self.function_call_count,
         }
     }
@@ -405,6 +416,9 @@ impl ThreadStore {
                     || event.result == SyncResult::Timeout;
                 if waited {
                     stats.lock_wait_total_ns += wait;
+                    if wait > stats.max_lock_wait_ns {
+                        stats.max_lock_wait_ns = wait;
+                    }
                 }
                 if waited || blocked {
                     stats.lock_contention_count += 1;
@@ -1342,6 +1356,8 @@ mod tests {
         assert_eq!(stats.lock_contention_count, 2);
         // avg = (3ms + 5ms) / 2 contentions = 4ms. Old code would report 0.
         assert_eq!(stats.avg_lock_wait_ns, Some(4_000_000));
+        // #118: the longest single wait (5ms Interrupted) is the long tail.
+        assert_eq!(stats.max_lock_wait_ns, Some(5_000_000));
     }
 
     /// A trylock that WouldBlock with zero wait is a contention but contributes
@@ -1377,6 +1393,60 @@ mod tests {
         assert_eq!(stats.lock_contention_count, 2);
         // total wait 6ms over 2 contentions = 3ms average.
         assert_eq!(stats.avg_lock_wait_ns, Some(3_000_000));
+        // #118: only the 6ms acquire actually waited; WouldBlock trylock has
+        // no wait, so max is the single real wait, not deflated by zero.
+        assert_eq!(stats.max_lock_wait_ns, Some(6_000_000));
+    }
+
+    /// #118: max_lock_wait_ns tracks the longest single wait, not just the
+    /// running average. A thread that waits 3ms then 5ms then 1ms must report
+    /// max=5ms even though avg=3ms — the long tail avg hides.
+    #[test]
+    fn test_stats_max_lock_wait_tracks_longest() {
+        let mut store = ThreadStore::new(make_config());
+        store.register_thread(ThreadInfo {
+            thread_id: 1, pthread_id: None, parent_thread_id: 0,
+            create_step: 0, exit_step: None, name: None,
+            stack_base: 0, stack_size: 0, tls_addr: 0, is_jni_attached: false,
+        }).unwrap();
+        let mk = |step, wait_ns| ThreadSyncEvent {
+            step, thread_id: 1,
+            sync_type: SyncEventType::MutexLock,
+            sync_object_addr: 0xA000,
+            result: SyncResult::Success,
+            wait_duration_ns: Some(wait_ns),
+        };
+        store.write_sync_event(mk(10, 3_000_000)).unwrap();
+        store.write_sync_event(mk(20, 5_000_000)).unwrap();
+        store.write_sync_event(mk(30, 1_000_000)).unwrap();
+        let stats = store.get_thread_stats(1).unwrap();
+        assert_eq!(stats.lock_contention_count, 3);
+        assert_eq!(stats.avg_lock_wait_ns, Some(3_000_000)); // (3+5+1)/3 = 3ms
+        assert_eq!(stats.max_lock_wait_ns, Some(5_000_000)); // long tail
+    }
+
+    /// #118: max_lock_wait_ns is None when the thread never waited (no
+    /// contention with a real wait), mirroring avg_lock_wait_ns.
+    #[test]
+    fn test_stats_max_lock_wait_none_when_no_wait() {
+        let mut store = ThreadStore::new(make_config());
+        store.register_thread(ThreadInfo {
+            thread_id: 1, pthread_id: None, parent_thread_id: 0,
+            create_step: 0, exit_step: None, name: None,
+            stack_base: 0, stack_size: 0, tls_addr: 0, is_jni_attached: false,
+        }).unwrap();
+        // A successful acquire with zero wait is not a contention.
+        store.write_sync_event(ThreadSyncEvent {
+            step: 10, thread_id: 1,
+            sync_type: SyncEventType::MutexLock,
+            sync_object_addr: 0xA000,
+            result: SyncResult::Success,
+            wait_duration_ns: None,
+        }).unwrap();
+        let stats = store.get_thread_stats(1).unwrap();
+        assert_eq!(stats.lock_contention_count, 0);
+        assert_eq!(stats.avg_lock_wait_ns, None);
+        assert_eq!(stats.max_lock_wait_ns, None);
     }
 
     /// Two context switches at the SAME step both survive on every read path.
