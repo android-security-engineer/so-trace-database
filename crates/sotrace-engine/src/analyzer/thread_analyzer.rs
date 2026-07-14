@@ -194,7 +194,9 @@ pub struct ThreadDataFlow {
     pub from_thread: u32,
     /// Destination thread (reader)
     pub to_thread: u32,
-    /// Memory address of the data transfer
+    /// Memory address of the data transfer (page-aligned base of the write).
+    /// Kept for backwards compatibility and the dedup key; the *precise*
+    /// transferred region is in `overlap_address`/`overlap_size`.
     pub address: u64,
     /// Step when the write occurred
     pub write_step: u64,
@@ -202,6 +204,19 @@ pub struct ThreadDataFlow {
     pub read_step: u64,
     /// Whether there was proper synchronization between write and read
     pub is_synchronized: bool,
+    /// Byte size of the writer's access (1, 2, 4, 8, …). Lets the RE judge
+    /// whether the transfer is a single field or an entire struct.
+    pub write_size: u64,
+    /// Byte size of the reader's access.
+    pub read_size: u64,
+    /// Start address of the *actual* overlapping byte range between the write
+    /// and the read — the precise set of bytes the reader could have observed
+    /// from the writer (the intersection of `[w, w+w_size)` and `[r, r+r_size)`).
+    /// Saturating arithmetic keeps it safe near `u64::MAX`.
+    pub overlap_address: u64,
+    /// Length in bytes of the overlapping range. Zero only for degenerate
+    /// boundary-touching accesses.
+    pub overlap_size: u64,
 }
 
 /// A synchronization mechanism identified by both its address AND its
@@ -1900,11 +1915,19 @@ impl ThreadAnalyzer {
 
         for (w_step, w_tid, w_addr, w_size) in &writes {
             // Use the page index to scan only reads sharing a page with this write.
-            for (r_step, r_tid, _r_addr, _r_size) in self.reads_overlapping(*w_addr, *w_size) {
+            for (r_step, r_tid, r_addr, r_size) in self.reads_overlapping(*w_addr, *w_size) {
                 if r_tid == *w_tid { continue; } // Same thread
                 if r_step <= *w_step { continue; } // Read before write
 
                 let is_sync = self.has_sync_between(*w_tid, r_tid, *w_step, r_step);
+
+                // Precise transferred byte range: intersection of the write
+                // `[w_addr, w_end)` and the read `[r_addr, r_end)`.
+                let w_end = (*w_addr).saturating_add(*w_size as u64);
+                let r_end = r_addr.saturating_add(r_size as u64);
+                let overlap_address = (*w_addr).max(r_addr);
+                let overlap_end = w_end.min(r_end);
+                let overlap_size = overlap_end.saturating_sub(overlap_address);
 
                 flows.push(ThreadDataFlow {
                     from_thread: *w_tid,
@@ -1913,6 +1936,10 @@ impl ThreadAnalyzer {
                     write_step: *w_step,
                     read_step: r_step,
                     is_synchronized: is_sync,
+                    write_size: *w_size as u64,
+                    read_size: r_size as u64,
+                    overlap_address,
+                    overlap_size,
                 });
             }
         }
@@ -3991,6 +4018,48 @@ mod tests {
             .find(|f| f.from_thread == 1 && f.to_thread == 2 && f.address == 0x3000)
             .unwrap();
         assert!(!flow.is_synchronized);
+        // #113: transfer sizes and precise transfer range are now reported
+        assert_eq!(flow.write_size, 4);
+        assert_eq!(flow.read_size, 4);
+        assert_eq!(flow.overlap_address, 0x3000);
+        assert_eq!(flow.overlap_size, 4);
+    }
+
+    /// #113: when the write and read only partially overlap, the transferred
+    /// range must be the *intersection*. Thread 1 writes 8 bytes at 0x5000
+    /// (0x5000-0x5007), thread 2 reads 8 bytes at 0x5004 (0x5004-0x500B) — the
+    /// actual transfer is 0x5004-0x5007 (4 bytes).
+    #[test]
+    fn test_data_flow_partial_overlap_transfer_range() {
+        let mut analyzer = ThreadAnalyzer::new();
+        analyzer.feed_thread_info(make_thread_info(1, "producer"));
+        analyzer.feed_thread_info(make_thread_info(2, "consumer"));
+        analyzer.feed_memory_write(100, 1, 0x5000, 8);
+        analyzer.feed_memory_read(200, 2, 0x5004, 8);
+        let flows = analyzer.analyze_data_flows();
+        assert!(!flows.is_empty());
+        let f = &flows[0];
+        assert_eq!(f.write_size, 8);
+        assert_eq!(f.read_size, 8);
+        assert_eq!(f.overlap_address, 0x5004);
+        assert_eq!(f.overlap_size, 4);
+    }
+
+    /// #113: accesses near `u64::MAX` must not overflow when computing the
+    /// transfer range (saturating arithmetic, mirroring #112 race overlap).
+    #[test]
+    fn test_data_flow_overlap_no_overflow_near_u64_max() {
+        let mut analyzer = ThreadAnalyzer::new();
+        analyzer.feed_thread_info(make_thread_info(1, "producer"));
+        analyzer.feed_thread_info(make_thread_info(2, "consumer"));
+        analyzer.feed_memory_write(100, 1, u64::MAX - 7, 8);
+        analyzer.feed_memory_read(200, 2, u64::MAX - 3, 8);
+        let flows = analyzer.analyze_data_flows();
+        assert!(!flows.is_empty());
+        let f = &flows[0];
+        assert_eq!(f.overlap_address, u64::MAX - 3);
+        // Saturating end clamps both ranges to MAX, so overlap is 3 bytes.
+        assert_eq!(f.overlap_size, 3);
     }
 
     #[test]
