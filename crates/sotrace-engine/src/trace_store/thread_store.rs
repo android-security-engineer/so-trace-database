@@ -108,6 +108,7 @@ struct ThreadStatsBuilder {
     context_switch_count: u64,
     sync_event_count: u64,
     lock_acquire_count: u64,
+    lock_release_count: u64,
     lock_contention_count: u64,
     lock_wait_total_ns: u64,
     function_call_count: u64,
@@ -120,6 +121,7 @@ impl ThreadStatsBuilder {
             context_switch_count: 0,
             sync_event_count: 0,
             lock_acquire_count: 0,
+            lock_release_count: 0,
             lock_contention_count: 0,
             lock_wait_total_ns: 0,
             function_call_count: 0,
@@ -140,6 +142,7 @@ impl ThreadStatsBuilder {
             context_switch_count: self.context_switch_count,
             sync_event_count: self.sync_event_count,
             lock_acquire_count: self.lock_acquire_count,
+            lock_release_count: self.lock_release_count,
             lock_contention_count: self.lock_contention_count,
             avg_lock_wait_ns,
             function_call_count: self.function_call_count,
@@ -406,6 +409,12 @@ impl ThreadStore {
                 if waited || blocked {
                     stats.lock_contention_count += 1;
                 }
+            } else if event.sync_type.is_release() {
+                // #114: symmetric to acquire counting — release/wake ops
+                // (MutexUnlock, RwLockUnlock, SemPost, FutexWake, and the
+                // wider CondvarSignal/Broadcast/FutexWakeCount per #109's
+                // is_release superset). acquire ≫ release flags a lock leak.
+                stats.lock_release_count += 1;
             }
         }
 
@@ -796,9 +805,79 @@ mod tests {
         // Check stats
         let stats1 = store.get_thread_stats(1).unwrap();
         assert_eq!(stats1.lock_acquire_count, 1);
+        assert_eq!(stats1.lock_release_count, 1); // thread 1 unlocked at step 150
         let stats2 = store.get_thread_stats(2).unwrap();
         assert_eq!(stats2.lock_acquire_count, 1);
         assert_eq!(stats2.lock_contention_count, 1);
+    }
+
+    /// #114: a MutexUnlock increments lock_release_count symmetric to acquire.
+    #[test]
+    fn test_lock_release_count_tracks_unlocks() {
+        let mut store = ThreadStore::new(make_config());
+        store.register_thread(ThreadInfo {
+            thread_id: 1, pthread_id: None, parent_thread_id: 0,
+            create_step: 0, exit_step: None, name: None,
+            stack_base: 0, stack_size: 0, tls_addr: 0, is_jni_attached: false,
+        }).unwrap();
+        store.write_sync_event(ThreadSyncEvent {
+            step: 10, thread_id: 1, sync_type: SyncEventType::MutexLock,
+            sync_object_addr: 0xA000, result: SyncResult::Success, wait_duration_ns: None,
+        }).unwrap();
+        store.write_sync_event(ThreadSyncEvent {
+            step: 20, thread_id: 1, sync_type: SyncEventType::MutexUnlock,
+            sync_object_addr: 0xA000, result: SyncResult::Success, wait_duration_ns: None,
+        }).unwrap();
+        let stats = store.get_thread_stats(1).unwrap();
+        assert_eq!(stats.lock_acquire_count, 1);
+        assert_eq!(stats.lock_release_count, 1);
+    }
+
+    /// #114: CondvarSignal counts as a release (wake-the-waiter semantics,
+    /// per #109's is_release superset).
+    #[test]
+    fn test_lock_release_count_includes_condvar_signal() {
+        let mut store = ThreadStore::new(make_config());
+        store.register_thread(ThreadInfo {
+            thread_id: 1, pthread_id: None, parent_thread_id: 0,
+            create_step: 0, exit_step: None, name: None,
+            stack_base: 0, stack_size: 0, tls_addr: 0, is_jni_attached: false,
+        }).unwrap();
+        store.write_sync_event(ThreadSyncEvent {
+            step: 10, thread_id: 1, sync_type: SyncEventType::CondvarSignal,
+            sync_object_addr: 0xB000, result: SyncResult::Success, wait_duration_ns: None,
+        }).unwrap();
+        let stats = store.get_thread_stats(1).unwrap();
+        assert_eq!(stats.lock_acquire_count, 0);
+        assert_eq!(stats.lock_release_count, 1);
+    }
+
+    /// #114: acquire without release is detectable (acquire > release → leak).
+    #[test]
+    fn test_lock_release_count_detects_leak() {
+        let mut store = ThreadStore::new(make_config());
+        store.register_thread(ThreadInfo {
+            thread_id: 1, pthread_id: None, parent_thread_id: 0,
+            create_step: 0, exit_step: None, name: None,
+            stack_base: 0, stack_size: 0, tls_addr: 0, is_jni_attached: false,
+        }).unwrap();
+        // Two acquires, one release → leak (acquire=2, release=1)
+        store.write_sync_event(ThreadSyncEvent {
+            step: 10, thread_id: 1, sync_type: SyncEventType::MutexLock,
+            sync_object_addr: 0xA000, result: SyncResult::Success, wait_duration_ns: None,
+        }).unwrap();
+        store.write_sync_event(ThreadSyncEvent {
+            step: 20, thread_id: 1, sync_type: SyncEventType::MutexLock,
+            sync_object_addr: 0xA001, result: SyncResult::Success, wait_duration_ns: None,
+        }).unwrap();
+        store.write_sync_event(ThreadSyncEvent {
+            step: 30, thread_id: 1, sync_type: SyncEventType::MutexUnlock,
+            sync_object_addr: 0xA000, result: SyncResult::Success, wait_duration_ns: None,
+        }).unwrap();
+        let stats = store.get_thread_stats(1).unwrap();
+        assert_eq!(stats.lock_acquire_count, 2);
+        assert_eq!(stats.lock_release_count, 1);
+        assert!(stats.lock_acquire_count > stats.lock_release_count);
     }
 
     #[test]

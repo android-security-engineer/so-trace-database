@@ -414,8 +414,16 @@ pub struct ThreadStats {
     pub context_switch_count: u64,
     /// Number of synchronization events
     pub sync_event_count: u64,
-    /// Number of lock acquisitions
+    /// Number of lock acquisitions (holdable acquires: MutexLock/Locked/TryLock,
+    /// RwLockRead/Write, SemWait, FutexWait — per #109's `is_acquire()`).
     pub lock_acquire_count: u64,
+    /// Number of lock releases / wake operations, counted via #109's
+    /// `is_release()`. This is a wide superset: besides `MutexUnlock`/
+    /// `RwLockUnlock`/`SemPost`/`FutexWake` it also includes `CondvarSignal`/
+    /// `CondvarBroadcast`/`FutexWakeCount` (wake-the-waiter semantics). To get
+    /// pure unlock counts, filter on the holdable-release subset. Comparing
+    /// this against `lock_acquire_count` flags lock leaks (acquire ≫ release).
+    pub lock_release_count: u64,
     /// Number of lock contentions (had to wait)
     pub lock_contention_count: u64,
     /// Average lock wait duration (in nanoseconds)
