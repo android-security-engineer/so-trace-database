@@ -293,6 +293,13 @@ pub struct ThreadSchedulingStats {
     pub migration_count: u64,
     /// Distinct CPU cores this thread ran on (sorted; empty if cores unknown)
     pub cpu_cores: Vec<u32>,
+    /// Per-core residency in steps: how long (in steps) this thread ran on
+    /// each CPU core, accumulated across all scheduling intervals. Sorted by
+    /// core id for deterministic output. A residency interval's length is the
+    /// step gap to the next switch that ended the interval; a final unbounded
+    /// run-in (no following switch) contributes 0, never a fabricated span.
+    /// Empty if no switch carried a `cpu_core` (cores unknown).
+    pub core_residency: Vec<(u32, u64)>,
 }
 
 /// Per-thread lifecycle / spawn-tree information.
@@ -2116,8 +2123,12 @@ impl ThreadAnalyzer {
     /// consumer for `context_switches`, which was otherwise collected but never
     /// analyzed.
     pub fn analyze_scheduling(&mut self) -> Vec<ThreadSchedulingStats> {
-        // Per-thread accumulator. `cpu_cores` is a set so repeated runs on the
-        // same core collapse to one entry.
+        // Per-thread accumulator. Counts (in/out/vol/invol/migration) are
+        // order-independent; `cores` is a set so repeated runs on the same
+        // core collapse. `core_residency` is accumulated via a global
+        // step-ordered pass below, because a residency interval's length is
+        // the step gap to the next switch that ended it — a global (cross-
+        // thread) temporal notion the per-thread counts cannot recover.
         #[derive(Default)]
         struct Acc {
             scheduled_in: u64,
@@ -2128,41 +2139,79 @@ impl ThreadAnalyzer {
             cores: HashSet<u32>,
         }
         let mut per_thread: HashMap<u32, Acc> = HashMap::new();
+        // thread -> core -> accumulated residency steps.
+        let mut residency: HashMap<u32, HashMap<u32, u64>> = HashMap::new();
+        // Last "run-in" of each thread: (step, core) where it was scheduled
+        // on, awaiting a closing switch to measure the span. None means no
+        // tracked interval (never scheduled on a known core, or just closed).
+        let mut last_in: HashMap<u32, (u64, u32)> = HashMap::new();
 
-        // Iterate in (step, insertion) order — a BTreeMap<step, Vec<_>>. Order
-        // does not affect the counts, but keeps traversal deterministic.
+        // Flatten the BTreeMap<step, Vec<ContextSwitch>> into a global,
+        // step-ordered sequence. BTreeMap iterates steps ascending; the Vec
+        // per step preserves insertion order (same-step switches, see #59).
+        let mut global: Vec<&ContextSwitch> = Vec::new();
         for switches in self.context_switches.values() {
-            for sw in switches {
-                // The thread being scheduled OFF: classify why it left.
-                let out = per_thread.entry(sw.from_thread).or_default();
-                out.scheduled_out += 1;
-                match sw.switch_reason {
-                    SwitchReason::Yield | SwitchReason::Blocking => out.voluntary += 1,
-                    SwitchReason::Preemption
-                    | SwitchReason::TimeSliceExpired
-                    | SwitchReason::Interrupt => out.involuntary += 1,
-                    // Migration / Other are neither cleanly voluntary nor forced;
-                    // they still count toward scheduled_out above.
-                    _ => {}
-                }
+            global.extend(switches.iter());
+        }
 
-                // The thread being scheduled ON: it now runs on `cpu_core`.
-                let in_acc = per_thread.entry(sw.to_thread).or_default();
-                in_acc.scheduled_in += 1;
-                if sw.switch_reason == SwitchReason::Migration {
-                    in_acc.migrations += 1;
-                }
-                if let Some(core) = sw.cpu_core {
-                    in_acc.cores.insert(core);
-                }
+        for sw in global {
+            // Close the running interval of `from_thread`: it ran on its
+            // last-in core from `last_in_step` until `sw.step`.
+            let out = per_thread.entry(sw.from_thread).or_default();
+            out.scheduled_out += 1;
+            match sw.switch_reason {
+                SwitchReason::Yield | SwitchReason::Blocking => out.voluntary += 1,
+                SwitchReason::Preemption
+                | SwitchReason::TimeSliceExpired
+                | SwitchReason::Interrupt => out.involuntary += 1,
+                // Migration / Other are neither cleanly voluntary nor forced;
+                // they still count toward scheduled_out above.
+                _ => {}
+            }
+            if let Some((start, core)) = last_in.remove(&sw.from_thread) {
+                let span = sw.step.saturating_sub(start);
+                *residency
+                    .entry(sw.from_thread)
+                    .or_default()
+                    .entry(core)
+                    .or_insert(0) += span;
+            }
+
+            // The thread being scheduled ON: it now runs on `cpu_core`.
+            let in_acc = per_thread.entry(sw.to_thread).or_default();
+            in_acc.scheduled_in += 1;
+            if sw.switch_reason == SwitchReason::Migration {
+                in_acc.migrations += 1;
+            }
+            if let Some(core) = sw.cpu_core {
+                in_acc.cores.insert(core);
+                // Track the new run-in interval only if we know the core; a
+                // None core leaves last_in unset so no residency is fabricated
+                // when it later closes.
+                last_in.insert(sw.to_thread, (sw.step, core));
+            } else {
+                // Unknown core: drop any prior interval so a later close
+                // doesn't attribute span to a stale core.
+                last_in.remove(&sw.to_thread);
             }
         }
+
+        // Final unbounded run-ins contribute 0 (no following switch closes
+        // them); we deliberately drop them rather than fabricate a span to
+        // trace-end. This mirrors #65's tail-state handling.
 
         let mut results: Vec<ThreadSchedulingStats> = per_thread
             .into_iter()
             .map(|(thread_id, acc)| {
                 let mut cpu_cores: Vec<u32> = acc.cores.into_iter().collect();
                 cpu_cores.sort_unstable();
+                // Collect this thread's residency, sorted by core id.
+                let mut core_residency: Vec<(u32, u64)> = residency
+                    .remove(&thread_id)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect();
+                core_residency.sort_unstable_by_key(|(core, _)| *core);
                 ThreadSchedulingStats {
                     thread_id,
                     scheduled_in_count: acc.scheduled_in,
@@ -2171,6 +2220,7 @@ impl ThreadAnalyzer {
                     involuntary_switches: acc.involuntary,
                     migration_count: acc.migrations,
                     cpu_cores,
+                    core_residency,
                 }
             })
             .collect();
@@ -3189,6 +3239,14 @@ mod tests {
         assert_eq!(t3.involuntary_switches, 0);
         assert_eq!(t3.migration_count, 0); // it was migrated *off*, not onto a core
         assert_eq!(t3.cpu_cores, vec![1]);
+
+        // #117: per-core residency in steps. Each thread ran 10 steps on its
+        // run-in core before being switched out. T1's tail run-in on core 2
+        // (@40) is unbounded (no following switch) and contributes 0, so T1
+        // only carries the core-0 interval @20..30 = 10 steps.
+        assert_eq!(t1.core_residency, vec![(0, 10)]);
+        assert_eq!(t2.core_residency, vec![(0, 10)]);
+        assert_eq!(t3.core_residency, vec![(1, 10)]);
     }
 
     /// Two context switches at the SAME step (two cores switching at once) must
@@ -3212,6 +3270,70 @@ mod tests {
         assert_eq!(stats[1].scheduled_in_count, 1); // T2 switched in
         assert_eq!(stats[2].scheduled_out_count, 1); // T3 switched out
         assert_eq!(stats[3].scheduled_in_count, 1); // T4 switched in
+
+        // #117: both run-ins (@100) are unbounded (no following switch), so
+        // no residency is fabricated for T2/T4; T1/T3 had no prior run-in to
+        // close. All four have empty residency — the field exists but no
+        // span is invented.
+        for s in &stats {
+            assert!(s.core_residency.is_empty(),
+                "unbounded run-ins contribute no residency, got {:?}", s.core_residency);
+        }
+    }
+
+    /// #117: core_residency accumulates per-core step spans. A thread run-in
+    /// on core 0 closed after 20 steps, then run-in on core 1 closed after 60
+    /// steps — the residency map carries both cores with their sums.
+    #[test]
+    fn test_scheduling_core_residency_accumulates_per_core() {
+        let mut analyzer = ThreadAnalyzer::new();
+        analyzer.feed_thread_info(make_thread_info(1, "t1"));
+        analyzer.feed_thread_info(make_thread_info(2, "t2"));
+        // @10: T1 preempted off (no prior run-in to close), T2 on core 0.
+        analyzer.feed_context_switch(make_switch(10, 1, 2, SwitchReason::Preemption, Some(0)));
+        // @30: T2 preempted off -> closes T2's core-0 run-in (20 steps), T1 on core 1.
+        analyzer.feed_context_switch(make_switch(30, 2, 1, SwitchReason::Preemption, Some(1)));
+        // @100: T1 preempted off -> closes T1's core-1 run-in (70 steps), T2 on core 0.
+        analyzer.feed_context_switch(make_switch(100, 1, 2, SwitchReason::Preemption, Some(0)));
+
+        let stats = analyzer.analyze_scheduling();
+        let t1 = stats.iter().find(|s| s.thread_id == 1).unwrap();
+        let t2 = stats.iter().find(|s| s.thread_id == 2).unwrap();
+        // T1: core-1 run-in @30..100 = 70 steps. (Its tail on core 0 after @100
+        // is unbounded — no following switch — and contributes 0.)
+        assert_eq!(t1.core_residency, vec![(1, 70)], "T1 ran 70 steps on core 1");
+        // T2: core-0 run-in @10..30 = 20 steps. (Its tail on core 0 after @100 is
+        // unbounded and contributes 0.)
+        assert_eq!(t2.core_residency, vec![(0, 20)], "T2 ran 20 steps on core 0");
+    }
+
+    /// #117: a switch with `cpu_core == None` must not fabricate residency and
+    /// must clear any stale run-in so a later close doesn't attribute span to
+    /// the wrong core.
+    #[test]
+    fn test_scheduling_unknown_core_does_not_fabricate_residency() {
+        let mut analyzer = ThreadAnalyzer::new();
+        analyzer.feed_thread_info(make_thread_info(1, "t1"));
+        analyzer.feed_thread_info(make_thread_info(2, "t2"));
+        analyzer.feed_thread_info(make_thread_info(3, "t3"));
+        // @10: T1 off, T2 on core 0.
+        analyzer.feed_context_switch(make_switch(10, 1, 2, SwitchReason::Preemption, Some(0)));
+        // @25: T2 off (no core info on the *incoming* T3) — T2's core-0 run-in
+        // closes at 25 (15 steps). T3's run-in has no core -> not tracked.
+        analyzer.feed_context_switch(make_switch(25, 2, 3, SwitchReason::Preemption, None));
+        // @50: T3 off, T1 on core 1 — T3 had no tracked run-in, so nothing is
+        // attributed to it. T1's tail on core 1 is unbounded.
+        analyzer.feed_context_switch(make_switch(50, 3, 1, SwitchReason::Preemption, Some(1)));
+
+        let stats = analyzer.analyze_scheduling();
+        let t2 = stats.iter().find(|s| s.thread_id == 2).unwrap();
+        let t3 = stats.iter().find(|s| s.thread_id == 3).unwrap();
+        // T2's core-0 interval @10..25 = 15 steps survived the None-core switch.
+        assert_eq!(t2.core_residency, vec![(0, 15)]);
+        // T3 was scheduled in with an unknown core and out again with no
+        // tracked run-in: no residency fabricated.
+        assert!(t3.core_residency.is_empty(),
+            "unknown-core run-in must not fabricate residency, got {:?}", t3.core_residency);
     }
 
     /// Build a thread info with an explicit parent and lifespan for lifecycle tests.
