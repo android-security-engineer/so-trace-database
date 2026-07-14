@@ -974,6 +974,9 @@ mod tests {
         assert_eq!(stats[0]["native_to_java_count"], 1);
         assert_eq!(stats[0]["native_addresses"], serde_json::json!([8192]));
         assert_eq!(stats[0]["java_methods"], serde_json::json!(["com.app.Bar.callback", "com.app.Foo.doWork"]));
+        // #119: first/last crossing step locate the JNI activity window (seq 10..20).
+        assert_eq!(stats[0]["first_crossing_step"], 10);
+        assert_eq!(stats[0]["last_crossing_step"], 20);
     }
 
     #[tokio::test]

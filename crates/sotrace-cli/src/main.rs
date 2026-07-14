@@ -1431,12 +1431,17 @@ fn print_jni_boundary(stats: &[sotrace_engine::analyzer::thread_analyzer::JniBou
                 _ => format!("0x{:X}", a),
             })
             .collect();
+        let window = match (s.first_crossing_step, s.last_crossing_step) {
+            (Some(f), Some(l)) => format!("steps {}..{}", f, l),
+            _ => "no crossings".to_string(),
+        };
         println!(
-            "  [{}] T{} attached={} crossings={} (j2n={} n2j={})  native=[{}]  java={}",
+            "  [{}] T{} attached={} crossings={} (j2n={} n2j={})  native=[{}]  java={}  window={}",
             i, s.thread_id, s.is_jni_attached, s.total_crossings,
             s.java_to_native_count, s.native_to_java_count,
             addrs.join(", "),
-            s.java_methods.join(", ")
+            s.java_methods.join(", "),
+            window
         );
     }
 }
@@ -1745,6 +1750,9 @@ mod tests {
         assert_eq!(s["native_to_java_count"], 1);
         assert_eq!(s["native_addresses"], serde_json::json!([8192]));
         assert_eq!(s["java_methods"], serde_json::json!(["com.app.Bar.callback", "com.app.Foo.doWork"]));
+        // #119: first/last crossing step locate the JNI activity window (seq 10..20).
+        assert_eq!(s["first_crossing_step"], 10);
+        assert_eq!(s["last_crossing_step"], 20);
     }
 
     #[test]
