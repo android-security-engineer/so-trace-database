@@ -1809,6 +1809,8 @@ mod tests {
         let sched = result["scheduling"].as_array().expect("scheduling array");
         assert!(!sched.is_empty(), "context switches should yield per-thread scheduling rows");
         assert!(sched.iter().all(|s| s["thread_id"].is_u64()));
+        // #117: core_residency is an array of [core, steps] pairs per thread.
+        assert!(sched.iter().all(|s| s["core_residency"].is_array()));
     }
 
     #[tokio::test]

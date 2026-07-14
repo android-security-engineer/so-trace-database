@@ -858,6 +858,9 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         let json: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert!(json["scheduling"].is_array());
+        // #117: each row carries core_residency as an array of [core, steps].
+        let sched = json["scheduling"].as_array().unwrap();
+        assert!(sched.iter().all(|s| s["core_residency"].is_array()));
     }
 
     #[tokio::test]

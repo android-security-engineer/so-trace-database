@@ -1354,11 +1354,15 @@ fn print_scheduling(stats: &[sotrace_engine::analyzer::thread_analyzer::ThreadSc
     println!("\n=== Thread Scheduling ({}) ===", stats.len());
     for (i, s) in stats.iter().enumerate() {
         let cores: Vec<String> = s.cpu_cores.iter().map(|c| c.to_string()).collect();
+        let residency: Vec<String> = s.core_residency.iter()
+            .map(|(core, steps)| format!("core{}:{}steps", core, steps))
+            .collect();
         println!(
-            "  [{}] T{}  in={} out={} (vol={} invol={}) migrations={}  cores=[{}]",
+            "  [{}] T{}  in={} out={} (vol={} invol={}) migrations={}  cores=[{}]  residency=[{}]",
             i, s.thread_id, s.scheduled_in_count, s.scheduled_out_count,
             s.voluntary_switches, s.involuntary_switches, s.migration_count,
-            cores.join(", ")
+            cores.join(", "),
+            residency.join(", ")
         );
     }
 }
