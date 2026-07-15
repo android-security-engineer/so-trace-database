@@ -267,6 +267,13 @@ pub struct ProducerConsumerPattern {
     pub cycle_count: u64,
     /// Average time between produce and consume (in steps)
     pub avg_latency_steps: u64,
+    /// Longest single produce→consume latency in steps across all detected
+    /// cycles (`max(read_step - write_step)`). Surfaces the tail that
+    /// `avg_latency_steps` hides — the one pathological stall among many fast
+    /// cycles is the real bottleneck for an RE (GC pause, contention spike,
+    /// scheduling jitter). Mirrors `ThreadStats::max_lock_wait_ns` (#118) and
+    /// `LockContentionInfo::max_wait_ns`.
+    pub max_latency_steps: u64,
     /// Synchronization mechanism used (typed: address + primitive kind), or
     /// `None` if no sync object was shared between the two threads.
     pub sync_mechanism: Option<SyncMechanism>,
@@ -2058,11 +2065,16 @@ impl ThreadAnalyzer {
             shared_addresses.sort_by_key(|s| s.address);
             shared_addresses.dedup_by(|a, b| a.address == b.address);
 
-            // Compute average latency
-            let total_latency: u64 = group_flows.iter()
+            // Compute average and max latency. Both derive from the same
+            // produce→consume step gap (read_step - write_step, saturating),
+            // so a single collected pass gives both. max surfaces the tail that
+            // avg hides (#120, mirroring #118's max_lock_wait_ns).
+            let latencies: Vec<u64> = group_flows.iter()
                 .map(|f| f.read_step.saturating_sub(f.write_step))
-                .sum();
+                .collect();
+            let total_latency: u64 = latencies.iter().sum();
             let avg_latency = total_latency / group_flows.len() as u64;
+            let max_latency = latencies.iter().copied().max().unwrap_or(0);
 
             // Find the sync mechanism (most common lock used between these threads)
             let sync_mechanism = self.find_sync_mechanism(*producer, *consumer);
@@ -2073,6 +2085,7 @@ impl ThreadAnalyzer {
                 shared_addresses,
                 cycle_count: group_flows.len() as u64,
                 avg_latency_steps: avg_latency,
+                max_latency_steps: max_latency,
                 sync_mechanism,
             });
         }
@@ -4303,6 +4316,66 @@ mod tests {
             pc.shared_addresses,
             vec![SharedAddress { address: 0x5000, access_size: 4, overlap_size: 4 }]
         );
+        // #120: both cycles have equal latency (100→130, 200→230 = 30 each),
+        // so max equals avg here. The distinct-latency case is covered by
+        // test_producer_consumer_max_latency_distinct_from_avg.
+        assert_eq!(pc.avg_latency_steps, 30);
+        assert_eq!(pc.max_latency_steps, 30);
+    }
+
+    /// #120: max_latency_steps captures the slowest produce→consume cycle,
+    /// distinct from avg when cycles have unequal latencies. Cycle 1: 30
+    /// steps (100→130), cycle 2: 70 steps (200→270) → avg=50, max=70.
+    #[test]
+    fn test_producer_consumer_max_latency_distinct_from_avg() {
+        let mut analyzer = ThreadAnalyzer::new();
+        analyzer.feed_thread_info(make_thread_info(1, "producer"));
+        analyzer.feed_thread_info(make_thread_info(2, "consumer"));
+        let mutex_addr = 0xABCD0000;
+
+        // Cycle 1: latency 30 (write 100 → read 130)
+        analyzer.feed_memory_write(100, 1, 0x5000, 4);
+        analyzer.feed_sync_event(ThreadSyncEvent {
+            step: 110, thread_id: 1,
+            sync_type: SyncEventType::MutexUnlock,
+            sync_object_addr: mutex_addr,
+            result: SyncResult::Success,
+            wait_duration_ns: None,
+        });
+        analyzer.feed_sync_event(ThreadSyncEvent {
+            step: 120, thread_id: 2,
+            sync_type: SyncEventType::MutexLock,
+            sync_object_addr: mutex_addr,
+            result: SyncResult::Success,
+            wait_duration_ns: Some(1000),
+        });
+        analyzer.feed_memory_read(130, 2, 0x5000, 4);
+
+        // Cycle 2: latency 70 (write 200 → read 270)
+        analyzer.feed_memory_write(200, 1, 0x5000, 4);
+        analyzer.feed_sync_event(ThreadSyncEvent {
+            step: 210, thread_id: 1,
+            sync_type: SyncEventType::MutexUnlock,
+            sync_object_addr: mutex_addr,
+            result: SyncResult::Success,
+            wait_duration_ns: None,
+        });
+        analyzer.feed_sync_event(ThreadSyncEvent {
+            step: 220, thread_id: 2,
+            sync_type: SyncEventType::MutexLock,
+            sync_object_addr: mutex_addr,
+            result: SyncResult::Success,
+            wait_duration_ns: Some(1000),
+        });
+        analyzer.feed_memory_read(270, 2, 0x5000, 4);
+
+        let patterns = analyzer.detect_producer_consumer();
+        let pc = patterns.iter()
+            .find(|p| p.producer_thread == 1 && p.consumer_thread == 2)
+            .unwrap();
+        assert_eq!(pc.cycle_count, 2);
+        assert_eq!(pc.avg_latency_steps, 50); // (30 + 70) / 2
+        assert_eq!(pc.max_latency_steps, 70); // tail, not the avg
     }
 
     /// #116: shared_addresses reports access_size and overlap_size per slot,
