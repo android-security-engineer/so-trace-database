@@ -1343,8 +1343,9 @@ fn print_producer_consumer(pcs: &[sotrace_engine::analyzer::thread_analyzer::Pro
             .map(|m| format!("0x{:x} ({:?})", m.addr, m.kind))
             .unwrap_or_else(|| "none".into());
         println!(
-            "  [{}] T{} → T{}  cycles={} avg_latency={}  addrs=[{}]  sync={}",
+            "  [{}] T{} → T{}  cycles={} avg_latency={} max_latency={}  addrs=[{}]  sync={}",
             i, p.producer_thread, p.consumer_thread, p.cycle_count, p.avg_latency_steps,
+            p.max_latency_steps,
             addrs.join(", "), sync
         );
     }

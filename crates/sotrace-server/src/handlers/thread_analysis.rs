@@ -852,6 +852,10 @@ mod tests {
         let slot = slots.iter().find(|s| s["address"] == 0x6000).unwrap();
         assert_eq!(slot["access_size"], 4);
         assert_eq!(slot["overlap_size"], 4);
+        // #120: max_latency_steps surfaces the slowest cycle. Both cycles here
+        // have equal latency (100→130, 200→230 = 30 each), so max == avg.
+        assert_eq!(pc["avg_latency_steps"], 30);
+        assert_eq!(pc["max_latency_steps"], 30);
     }
 
     #[tokio::test]
