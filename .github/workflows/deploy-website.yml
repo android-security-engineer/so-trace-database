@@ -5,12 +5,15 @@ on:
     branches: [main]
     paths:
       - 'website/**'
+      - '.github/workflows/deploy-website.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
   pages: write
   id-token: write
+  # configure-pages enablement creates the Pages site when it does not exist yet.
+  administration: write
 
 concurrency:
   group: pages
@@ -40,6 +43,8 @@ jobs:
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
