@@ -12,8 +12,6 @@ permissions:
   contents: read
   pages: write
   id-token: write
-  # configure-pages enablement creates the Pages site when it does not exist yet.
-  administration: write
 
 concurrency:
   group: pages
