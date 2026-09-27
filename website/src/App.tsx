@@ -33,6 +33,8 @@ export default function App() {
             style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none' }}
             items={[
               { key: 'product', label: <a href="#hero">产品</a> },
+              { key: 'problem', label: <a href="#problem">问题</a> },
+              { key: 'fix', label: <a href="#fix">怎么解决</a> },
               { key: 'usage', label: <a href="#usage">用法</a> },
               { key: 'throughput', label: <a href="#throughput">吞吐</a> },
               { key: 'boundary', label: <a href="#boundary">边界</a> },
@@ -91,6 +93,20 @@ export default function App() {
           </section>
 
           <Story />
+
+          <section className="band band-rule" id="problem">
+            <Title level={2}>问题</Title>
+            <Paragraph style={{ fontSize: 18, maxWidth: 720 }}>
+              打开 SO 文件看不到运行时结果。反汇编只能给出静态指令和写进文件的常量。这次有没有走进某个分支、内存写成了什么、寄存器里最后是多少，都不在这份二进制里。
+            </Paragraph>
+          </section>
+
+          <section className="band band-rule" id="fix">
+            <Title level={2}>怎么解决</Title>
+            <Paragraph style={{ fontSize: 18, maxWidth: 720 }}>
+              先把一次执行记成轨迹，用 trace-save 存进数据库。里面可以放下指令、内存和寄存器事件。然后再用 query 把已经存进轨迹的记录读回来，按地址或步号对上那一次运行。
+            </Paragraph>
+          </section>
 
           <section className="band band-rule" id="stores">
             <Title level={2}>轨迹里能查的东西</Title>
