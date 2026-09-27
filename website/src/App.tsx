@@ -1,4 +1,5 @@
 import { Alert, Button, Col, ConfigProvider, Layout, Menu, Row, Typography, theme } from 'antd'
+import Story from './Story'
 
 const { Header, Content, Footer } = Layout
 const { Paragraph, Title } = Typography
@@ -88,6 +89,8 @@ export default function App() {
               </table>
             </div>
           </section>
+
+          <Story />
 
           <section className="band band-rule" id="stores">
             <Title level={2}>轨迹里能查的东西</Title>

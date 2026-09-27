@@ -121,6 +121,59 @@ body {
   line-height: 1.7;
 }
 
+.story-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.story-head h2 {
+  margin: 0;
+  font-family: "Noto Serif SC", serif;
+  font-size: 28px;
+}
+
+.story-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.story-flow {
+  fill: none;
+  stroke: #0e6b5c;
+  stroke-width: 2;
+  stroke-dasharray: 6 8;
+  animation: story-dash 1.4s linear infinite;
+}
+
+.story-packet {
+  fill: #e2a06a;
+  animation: story-move 1.8s ease-in-out infinite;
+}
+
+.story-packet-late {
+  animation-delay: 0.6s;
+}
+
+@keyframes story-dash {
+  to { stroke-dashoffset: -28; }
+}
+
+@keyframes story-move {
+  from { transform: translateX(0); }
+  to { transform: translateX(90px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .story-flow,
+  .story-packet {
+    animation: none;
+  }
+}
+
 @media (max-width: 800px) {
   .site-hero,
   .rate-pair {
