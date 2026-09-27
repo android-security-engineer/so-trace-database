@@ -1,0 +1,25 @@
+[package]
+name = "sotrace-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SO Trace Database — core engine (delta store, query, timeline)"
+
+[dependencies]
+sotrace-core = { path = "../sotrace-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bincode = { workspace = true }
+memmap2 = { workspace = true }
+zstd = { workspace = true }
+lz4_flex = { workspace = true }
+sha2 = { workspace = true }
+crc32fast = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+object = "0.36"
+
+[dev-dependencies]
+proptest = { workspace = true }
+tempfile = { workspace = true }

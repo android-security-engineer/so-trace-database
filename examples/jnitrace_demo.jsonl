@@ -1,0 +1,2 @@
+{"type":"async","payload":[{"tid":300,"type":"J2N","class":"com.example.Crypto","method":"decrypt","signature":"([B)[B","address":"0x4000","env":"0x7f00"}]}
+{"type":"async","payload":[{"tid":300,"type":"N2J","class":"com.example.Crypto","method":"getBytes","signature":"()[B","address":"0x4040","env":"0x7f00"}]}

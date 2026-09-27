@@ -1,0 +1,23 @@
+[package]
+name = "sotrace-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SO Trace Database CLI tool"
+
+[[bin]]
+name = "sotrace"
+path = "src/main.rs"
+
+[dependencies]
+sotrace-core = { path = "../sotrace-core" }
+sotrace-engine = { path = "../sotrace-engine" }
+clap = { version = "4", features = ["derive", "env"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }

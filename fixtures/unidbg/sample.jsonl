@@ -1,0 +1,10 @@
+{"type":"thread","seq":0,"tid":7,"name":"main","is_jni_attached":true}
+{"type":"instruction","seq":1,"tid":7,"address":"0x71001000","opcode":[210,128,0,0]}
+{"type":"memory_read","seq":2,"tid":7,"address":"0x71002000","size":4}
+{"type":"memory_write","seq":3,"tid":7,"address":"0x71002004","size":2,"value":"0x1234"}
+{"type":"call","seq":4,"tid":7,"caller":"0x71001004","callee":"0x71001100","depth":1}
+{"type":"jni_call","seq":5,"tid":7,"direction":"j2n","java_class":"com.example.Native","java_method":"run","signature":"()V","native_address":"0x71001100","jni_env":"0x72000000"}
+{"type":"sync","seq":6,"tid":7,"op":"mutex_lock","addr":"0x72001000","result":"ok"}
+{"type":"context_switch","seq":7,"from_thread":7,"tid":8,"reason":"yield","cpu":2}
+{"type":"state_change","seq":8,"tid":8,"state":"running","prev_state":"runnable"}
+{"type":"register_delta","seq":9,"change_mask":"0x3","values":[1,2]}

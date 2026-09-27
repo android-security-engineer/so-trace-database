@@ -1,0 +1,11 @@
+{
+    "name": "sotrace-binja",
+    "author": "sotrace-database",
+    "description": "Upload static analysis trace data to sotrace-database for thread analysis",
+    "version": "0.1.0",
+    "minimumBinaryNinjaVersion": 3000,
+    "platforms": ["Darwin", "Linux", "Windows"],
+    "installedPlatforms": ["Darwin", "Linux", "Windows"],
+    "type": ["helper", "ui"],
+    "api": ["python3"]
+}

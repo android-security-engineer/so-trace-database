@@ -1,0 +1,20 @@
+{
+  "trace_id": 1,
+  "so_file_id": 1,
+  "threads": [
+    {"thread_id": 1, "pthread_id": null, "parent_thread_id": 0, "create_step": 0, "exit_step": null, "name": "main", "stack_base": 0, "stack_size": 0, "tls_addr": 0, "is_jni_attached": false},
+    {"thread_id": 2, "pthread_id": null, "parent_thread_id": 0, "create_step": 0, "exit_step": null, "name": "worker", "stack_base": 0, "stack_size": 0, "tls_addr": 0, "is_jni_attached": false}
+  ],
+  "instructions": [
+    {"seq": 0, "thread_id": 1, "address": 44944, "timestamp": null, "is_branch": false, "branch_taken": false, "opcode": null}
+  ],
+  "memory_writes": [
+    {"step": 5, "thread_id": 1, "address": 4096, "data": [255,255,255,255]}
+  ],
+  "memory_reads": [
+    {"step": 8, "thread_id": 2, "address": 4096, "size": 4}
+  ],
+  "sync_events": [
+    {"step": 3, "thread_id": 1, "sync_type": "MutexLock", "sync_object_addr": 2882338816, "result": "Success", "wait_duration_ns": null}
+  ]
+}

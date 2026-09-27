@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 /// Thread metadata — recorded once when a thread is created or first seen
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThreadInfo {
     /// OS thread ID (gettid on Linux/Android)
     pub thread_id: u32,
@@ -103,7 +103,7 @@ impl ThreadState {
 }
 
 /// Thread state change event
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThreadStateChange {
     /// Step number when the change occurred
     pub step: u64,
@@ -343,7 +343,7 @@ pub enum SyncResult {
 }
 
 /// Thread synchronization event
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThreadSyncEvent {
     /// Step number when this event occurred
     pub step: u64,
@@ -383,7 +383,7 @@ pub enum SwitchReason {
 }
 
 /// Context switch record — when CPU execution moves from one thread to another
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContextSwitch {
     /// Step number when the switch occurred
     pub step: u64,

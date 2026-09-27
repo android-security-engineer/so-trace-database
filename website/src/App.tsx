@@ -1,42 +1,50 @@
+import { Alert, Card, ConfigProvider, Layout, Typography, theme } from 'antd'
+
+const { Content } = Layout
+const { Title, Paragraph } = Typography
+
 export default function App() {
   return (
-    <main style={{ maxWidth: 880, margin: '0 auto', padding: '64px 24px 96px' }}>
-      <p style={{ color: '#8ab4ff', letterSpacing: '0.08em', fontSize: 13, marginBottom: 16 }}>
-        Android SO 执行轨迹数据库
-      </p>
-      <h1 style={{ fontSize: 44, lineHeight: 1.2, fontWeight: 650, marginBottom: 20 }}>
-        SO Trace Database
-      </h1>
-      <p style={{ fontSize: 18, lineHeight: 1.7, color: '#c9d1d9', marginBottom: 28 }}>
-        SO Trace Database 是面向 Android 平台 SO（共享库）逆向分析的执行轨迹数据库。它存储并查询指令、内存、寄存器、调用和线程事件，不替代 Frida、Pin 或 DynamoRIO 的采集，也不做符号执行。
-      </p>
-      <p style={{ fontSize: 20, lineHeight: 1.6, marginBottom: 40 }}>
-        限量单进程版本现在可以发布。没有日历发布日。
-      </p>
-
-      <section style={{ marginBottom: 36 }}>
-        <h2 style={{ fontSize: 22, marginBottom: 12 }}>发布入口</h2>
-        <p style={{ lineHeight: 1.75, color: '#c9d1d9' }}>
-          发布入口是单进程 sotrace-server。CLI 和 MCP 是配套入口，和服务器一样把事件送进同一条导入路径。backend/ 下的 FastAPI 不是发布入口。
-        </p>
-      </section>
-
-      <section style={{ marginBottom: 36 }}>
-        <h2 style={{ fontSize: 22, marginBottom: 12 }}>怎样启动这一版</h2>
-        <p style={{ lineHeight: 1.75, color: '#c9d1d9', marginBottom: 12 }}>
-          进程启动时设置口令 SOTRACE_AUTH_TOKEN、数据目录 SOTRACE_DATA_DIR，以及绑定地址 SOTRACE_BIND。未设置口令时服务器拒绝启动。导入和指令查询要带与该口令一致的 Authorization: Bearer。健康检查不需要凭证。
-        </p>
-        <p style={{ lineHeight: 1.75, color: '#c9d1d9' }}>
-          导入只留在内存里，直到调用保存成功才落盘。导入返回成功不等于崩溃之后还能读回。保存成功之后，新进程打开同一数据目录才能读到这批事件。
-        </p>
-      </section>
-
-      <section>
-        <h2 style={{ fontSize: 22, marginBottom: 12 }}>还不能当成已经完成</h2>
-        <p style={{ lineHeight: 1.75, color: '#c9d1d9' }}>
-          以下尚未验收，不能对外说已经完成：VISION 的 10x 压缩、单次不少于 10 亿条记录、单个数据库不少于 100GB、SPEC §6.2 的查询延迟（不是已验收的 SLA），以及微服务拆分。这一版就是一个 sotrace-server 进程。
-        </p>
-      </section>
-    </main>
+    <ConfigProvider
+      theme={{
+        algorithm: theme.darkAlgorithm,
+        token: {
+          colorPrimary: '#8ab4ff',
+          colorBgBase: '#0a0a0f',
+          fontFamily: "'Iowan Old Style', 'Palatino Linotype', Palatino, 'Songti SC', serif",
+          fontSize: 17,
+          lineHeight: 1.7,
+        },
+      }}
+    >
+      <Layout style={{ minHeight: '100vh', background: 'transparent' }}>
+        <Content style={{ maxWidth: 720, margin: '0 auto', padding: '72px 24px 96px' }}>
+          <Paragraph style={{ color: '#8ab4ff', marginBottom: 12 }}>
+            Android SO 执行轨迹数据库
+          </Paragraph>
+          <Title style={{ fontWeight: 650, marginTop: 0 }}>SO Trace Database</Title>
+          <Paragraph style={{ fontSize: 18 }}>
+            SO Trace Database 是面向 Android 平台 SO（共享库）逆向分析的执行轨迹存储与查询数据库。它把指令、内存写入、寄存器、调用和线程事件存下来，再按地址、步号和线程查回去。
+          </Paragraph>
+          <Paragraph>
+            SO 二进制本身只能看到静态指令和写进文件的常量。一次执行里才会出现的分支、内存写入和寄存器值，并不写在这份 .so 里。只打开二进制会漏掉这些行为。这个数据库解决的就是这件事：把采集到的运行时记录存住，并在分析时检索出来。
+          </Paragraph>
+          <Card title="产品边界" style={{ margin: '28px 0' }}>
+            <Paragraph style={{ marginBottom: 0 }}>
+              它不是 trace 采集工具，不替代 Frida、Pin 或 DynamoRIO。它也不是符号执行框架，不做自动漏洞检测。采集仍由现有工具完成，符号执行仍由专门的分析器完成。这里只做轨迹的存储和查询。
+            </Paragraph>
+          </Card>
+          <Paragraph>
+            对外发布的是单进程 sotrace-server，配套的 sotrace 命令行走同一条导入和查询路径。backend/ 下的 FastAPI 不是发布入口。
+          </Paragraph>
+          <Alert
+            type="warning"
+            showIcon
+            message="这些目标还没有验收"
+            description="相对原始文本 10 倍压缩、单次不少于 10 亿条记录、单个数据库不少于 100GB，以及 SPEC §6.2 的查询延迟，都还不是已经验收的结果，也不能当成 SLA。这一版是一个 sotrace-server 进程，不含微服务拆分。"
+          />
+        </Content>
+      </Layout>
+    </ConfigProvider>
   )
 }

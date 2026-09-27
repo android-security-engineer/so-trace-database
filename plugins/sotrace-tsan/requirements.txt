@@ -1,0 +1,4 @@
+# No external Python dependencies — uses stdlib only (urllib.request, json, re)
+# TSan is part of LLVM/Clang/GCC toolchain:
+#   Android NDK: compile with -fsanitize=thread (ndk-build or cmake)
+#   Linux/macOS: clang -fsanitize=thread

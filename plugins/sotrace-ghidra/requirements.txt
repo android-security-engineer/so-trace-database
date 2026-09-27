@@ -1,0 +1,2 @@
+# PyGhidra headless mode only — Script Manager modes need no extra deps
+pyghidra>=1.0.0

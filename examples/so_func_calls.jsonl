@@ -1,0 +1,3 @@
+{"type":"call","tid":1,"caller":"0x1000","callee":"0x117d0","depth":0}
+{"type":"call","tid":2,"caller":"0x2000","callee":"0x117d0","depth":0}
+{"type":"call","tid":1,"caller":"0x1000","callee":"0x117c0","depth":0}

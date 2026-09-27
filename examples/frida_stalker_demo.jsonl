@@ -1,0 +1,7 @@
+{"type":"inst","tid":100,"pc":"0x7fff1000"}
+{"type":"inst","tid":100,"pc":"0x7fff1004","is_branch":true,"branch_taken":true}
+{"type":"memwrite","tid":100,"address":"0x7fff1000","data":[255,255,255,255]}
+{"type":"inst","tid":200,"pc":"0x7fff2000"}
+{"type":"memread","tid":200,"address":"0x7fff1000","size":4}
+{"type":"sync","tid":100,"sync_type":"MutexLock","sync_object_addr":"0xABCD0000","result":"Success"}
+{"type":"sync","tid":200,"sync_type":"MutexLock","sync_object_addr":"0xABCD0000","result":"Success","wait_duration_ns":1500}

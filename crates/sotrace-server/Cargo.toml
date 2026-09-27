@@ -1,0 +1,33 @@
+[package]
+name = "sotrace-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SO Trace Database HTTP API Server"
+
+[[bin]]
+name = "sotrace-server"
+path = "src/main.rs"
+
+[dependencies]
+sotrace-core = { path = "../sotrace-core" }
+sotrace-engine = { path = "../sotrace-engine" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+utoipa = { workspace = true }
+utoipa-swagger-ui = { workspace = true }
+jsonwebtoken = { workspace = true }
+argon2 = { workspace = true }
+chrono = { workspace = true }
+futures = "0.3"
+
+[dev-dependencies]
+tower = { workspace = true, features = ["util"] }
+tempfile = { workspace = true }

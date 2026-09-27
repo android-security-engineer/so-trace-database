@@ -1,0 +1,23 @@
+{
+  "trace_id": 1,
+  "so_file_id": 1,
+  "threads": [
+    {"thread_id": 1, "pthread_id": null, "parent_thread_id": 0, "create_step": 0, "exit_step": null, "name": "main", "stack_base": 0, "stack_size": 0, "tls_addr": 0, "is_jni_attached": false}
+  ],
+  "instructions": [
+    {"seq": 0, "thread_id": 1, "address": 4096, "timestamp": null, "is_branch": false, "branch_taken": false, "opcode": null}
+  ],
+  "register_deltas": [
+    {"seq": 1, "change_mask": 1, "values": [43981]},
+    {"seq": 3, "change_mask": 1, "values": [4660]},
+    {"seq": 5, "change_mask": 1, "values": [4660]},
+    {"seq": 5, "change_mask": 1, "values": [305419896]},
+    {"seq": 8, "change_mask": 4294967296, "values": [16384]}
+  ],
+  "calls": [
+    {"id": 1, "thread_id": 1, "event_type": "Call", "caller_address": 4096, "callee_address": 8192, "callee_func_id": 100, "seq": 1, "depth": 0, "return_seq": 9},
+    {"id": 2, "thread_id": 1, "event_type": "Call", "caller_address": 8208, "callee_address": 12288, "callee_func_id": 200, "seq": 3, "depth": 1, "return_seq": 7},
+    {"id": 3, "thread_id": 1, "event_type": "Return", "caller_address": 0, "callee_address": 12288, "callee_func_id": 200, "seq": 7, "depth": 1, "return_seq": null},
+    {"id": 4, "thread_id": 1, "event_type": "Return", "caller_address": 0, "callee_address": 8192, "callee_func_id": 100, "seq": 9, "depth": 0, "return_seq": null}
+  ]
+}

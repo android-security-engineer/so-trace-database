@@ -1,0 +1,24 @@
+[package]
+name = "sotrace-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SO Trace Database — MCP Server for AI Agent integration"
+
+[[bin]]
+name = "sotrace-mcp"
+path = "src/main.rs"
+
+[dependencies]
+sotrace-core = { path = "../sotrace-core" }
+sotrace-engine = { path = "../sotrace-engine" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "rt", "macros"] }
+base64 = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }

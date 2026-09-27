@@ -1,0 +1,5 @@
+# No external dependencies — uses Python stdlib (urllib.request, json, os)
+# IDA Pro ships its own Python; pip install is not needed for the plugin itself.
+#
+# Optional (for headless / batch mode outside IDA):
+#   pip install pyidat  # if you want to call idat64 from Python scripts

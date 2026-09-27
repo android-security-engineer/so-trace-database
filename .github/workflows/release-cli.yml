@@ -1,0 +1,46 @@
+name: Release CLI
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release CLI and server
+        run: cargo build --release -p sotrace-cli -p sotrace-server
+
+      - name: Stage Linux assets
+        run: |
+          mkdir -p dist
+          install -m 0755 target/release/sotrace dist/sotrace-linux-x86_64
+          install -m 0755 target/release/sotrace-server dist/sotrace-server-linux-x86_64
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('v0.1.{0}', github.run_number) }}
+          target_commitish: ${{ github.sha }}
+          name: SO Trace Database ${{ github.ref_type == 'tag' && github.ref_name || format('v0.1.{0}', github.run_number) }}
+          body: |
+            Linux x86_64 binaries built by GitHub Actions on ubuntu-latest.
+            `sotrace-linux-x86_64` is the shipping CLI. `sotrace-server-linux-x86_64` is the HTTP server.
+            The server refuses to start until the operator sets SOTRACE_AUTH_TOKEN. This release does not contain a token or a data directory.
+          files: |
+            dist/sotrace-linux-x86_64
+            dist/sotrace-server-linux-x86_64
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

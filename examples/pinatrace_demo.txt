@@ -1,0 +1,4 @@
+# Pin pinatrace memory access trace
+0x1f4: read 0x7fff1000
+0x1f4: write 0x7fff2000
+0x1f5: read 0x7fff1000

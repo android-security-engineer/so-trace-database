@@ -1,0 +1,52 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/sotrace-core",
+    "crates/sotrace-engine",
+    "crates/sotrace-server",
+    "crates/sotrace-cli",
+    "crates/sotrace-mcp",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/android-security-engineer/so-trace-database"
+
+[workspace.dependencies]
+# Core dependencies
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bincode = "1"
+memmap2 = "0.9"
+zstd = "0.13"
+lz4_flex = "0.11"
+sha2 = "0.10"
+crc32fast = "1"
+thiserror = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# Server dependencies
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "compression-gzip", "trace"] }
+utoipa = "5"
+utoipa-swagger-ui = "5"
+jsonwebtoken = "9"
+argon2 = "0.5"
+chrono = { version = "0.4", features = ["serde"] }
+
+# gRPC (Phase 2)
+tonic = "0.12"
+prost = "0.13"
+
+# Testing
+proptest = "1"
+tempfile = "3"
+
+# Encoding (MCP carries ELF bytes as base64 inside JSON-RPC args)
+base64 = "0.22"

@@ -1,0 +1,10 @@
+# AssemblyCodeDumper output
+0x71001000: mov x0, x1
+0x71001004: bl 0x71001100
+
+# TraceMemoryHook output
+Memory READ at 0x71002000, data size = 4, data value = 0x12, PC=0x71001000, LR=0x71001100
+Memory WRITE at 0x71002004, data size = 2, data value = 0xabcd, PC=0x71001004, LR=0x71001100
+
+# Custom listener output; text mode has no reliable OS tid, so defaults to 1.
+tid 7 call 0x71001004 -> 0x71001100

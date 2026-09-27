@@ -1,0 +1,6 @@
+# DynamoRIO drcachesim-style instruction trace
+tid 100 pc 0x1000
+tid 100 pc 0x1004 call
+tid 100 pc 0x1008 ret
+tid 200 pc 0x2000
+tid 200 pc 0x2004
