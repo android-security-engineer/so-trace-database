@@ -37,6 +37,35 @@ export default function App() {
           <Paragraph>
             对外发布的是单进程 sotrace-server，配套的 sotrace 命令行走同一条导入和查询路径。backend/ 下的 FastAPI 不是发布入口。
           </Paragraph>
+          <Card title="怎么用" style={{ marginBottom: 28 }}>
+            <Paragraph>
+              Linux x86_64 复制下面这段。它下载已发布的 sotrace-linux-x86_64，并把它当成可执行的 sotrace。存一条轨迹用 trace-save，再把它查出来用 query。
+            </Paragraph>
+            <pre
+              style={{
+                margin: 0,
+                padding: 16,
+                overflowX: 'auto',
+                background: '#12141c',
+                borderRadius: 8,
+                fontSize: 14,
+                lineHeight: 1.6,
+              }}
+            >{`curl -fsSL -o sotrace https://github.com/android-security-engineer/so-trace-database/releases/download/v0.1.0/sotrace-linux-x86_64
+chmod +x sotrace
+./sotrace --help`}</pre>
+          </Card>
+          <Card title="这台机器上的写入吞吐" style={{ marginBottom: 28 }}>
+            <Paragraph>
+              下面两个数是本机 release 二进制的样本中位数，不是可移植的 SLA。内存导入和耐久落盘是两条分开的速率。
+            </Paragraph>
+            <Paragraph>
+              内存里的 TraceEngine::feed_events：6445831 条/秒。这是 5 次试验 events_per_sec 的中位数，导入时不 fsync。
+            </Paragraph>
+            <Paragraph style={{ marginBottom: 0 }}>
+              含持久化的耐久写入：3617370 条/秒。这是 3 次试验 ingest_events_sec 的中位数，每次写入 200000 条并落盘。
+            </Paragraph>
+          </Card>
           <Alert
             type="warning"
             showIcon
