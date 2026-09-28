@@ -22,6 +22,8 @@ use anyhow::Result;
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 
+use std::collections::BTreeMap;
+
 use crate::delta_store::delta_log::EventLog;
 use crate::delta_store::snapshot::SnapshotManager;
 use crate::delta_store::types::*;
@@ -51,6 +53,12 @@ pub struct MemoryStore {
     page_cache: HashMap<u64, Vec<u8>>,
     /// Content-addressable page store: hash → page data (for dedup)
     page_cas: HashMap<[u8; 32], Vec<u8>>,
+    /// Original writes keyed by step, in insertion order.
+    ///
+    /// Page logs keep byte deltas and cannot be listed without an address.
+    /// This index is the step-only view: the address and bytes recorded at
+    /// that step, not a reconstruction of earlier writes.
+    step_writes: BTreeMap<u64, Vec<(u64, Vec<u8>)>>,
     /// Configuration
     config: DeltaStoreConfig,
 }
@@ -87,8 +95,16 @@ impl MemoryStore {
             snapshot_manager: SnapshotManager::new(config.clone()),
             page_cache: HashMap::new(),
             page_cas: HashMap::new(),
+            step_writes: BTreeMap::new(),
             config,
         }
+    }
+
+    /// Memory writes whose step is exactly `step`, in insertion order.
+    ///
+    /// Earlier writes are not included. Listing them does not require the address.
+    pub fn writes_at_step(&self, step: u64) -> Vec<(u64, Vec<u8>)> {
+        self.step_writes.get(&step).cloned().unwrap_or_default()
     }
 
     /// Record a memory write event
@@ -96,6 +112,8 @@ impl MemoryStore {
     /// The write may span multiple pages. For each affected page,
     /// we compute a byte-level delta from the previous page content.
     pub fn write(&mut self, write: MemoryWrite) -> Result<()> {
+        let recorded = (write.address, write.data.clone());
+        let recorded_step = write.step;
         // Copied out of `self.config` so the per-page log can be created inside
         // the loop without holding a borrow of `self` across `page_logs`.
         let compression = self.config.compression;
@@ -188,6 +206,7 @@ impl MemoryStore {
                 None => break,
             }
         }
+        self.step_writes.entry(recorded_step).or_default().push(recorded);
 
         Ok(())
     }

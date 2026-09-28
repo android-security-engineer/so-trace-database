@@ -319,6 +319,10 @@ fn run_query(
                 "context_switches": switches,
             })
         }
+        QueryCmd::Snapshot { step } => {
+            let snap = engine.query_step_snapshot(*step);
+            serde_json::to_value(&snap).expect("step snapshot is serializable")
+        }
         QueryCmd::Register { register_id, step } => {
             let value = engine.query_register(*register_id, *step);
             serde_json::json!({

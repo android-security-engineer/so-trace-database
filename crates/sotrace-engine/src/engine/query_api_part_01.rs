@@ -1,3 +1,25 @@
+use serde::Serialize;
+
+/// One memory write recorded at a single instruction step.
+#[derive(Debug, Clone, Serialize)]
+pub struct StepMemoryWrite {
+    pub address: u64,
+    pub data: Vec<u8>,
+}
+
+/// Instruction, register file, and this step's memory writes.
+///
+/// Reconstructed from the shared step timeline. Not a stored machine image.
+/// `registers` is absent when no register delta exists at or before `step`.
+/// `memory_writes` lists only writes whose step equals `step`.
+#[derive(Debug, Clone, Serialize)]
+pub struct StepSnapshot {
+    pub step: u64,
+    pub instruction: Option<InstructionTrace>,
+    pub registers: Option<sotrace_core::models::register_delta::RegisterState>,
+    pub memory_writes: Vec<StepMemoryWrite>,
+}
+
 impl TraceEngine {
 
     /// Query instruction at a specific step.
@@ -8,6 +30,27 @@ impl TraceEngine {
     /// when an adapter assigns the same `seq` to several instructions, use
     /// [`Self::query_instructions_range`] or the store's `get_at_step` to see
     /// all of them.
+    /// Instruction, register file, and memory writes at one step.
+    ///
+    /// The caller passes only the step. The register file is the replay as of
+    /// that step, including earlier deltas. Memory writes are only those
+    /// recorded at this step, not earlier bytes still visible to
+    /// [`Self::query_memory_value`].
+    pub fn query_step_snapshot(&self, step: u64) -> StepSnapshot {
+        let memory_writes = self
+            .memory
+            .writes_at_step(step)
+            .into_iter()
+            .map(|(address, data)| StepMemoryWrite { address, data })
+            .collect();
+        StepSnapshot {
+            step,
+            instruction: self.query_instruction(step).cloned(),
+            registers: self.reconstruct_register_state(step),
+            memory_writes,
+        }
+    }
+
     pub fn query_instruction(&self, step: u64) -> Option<&InstructionTrace> {
         self.instructions.get_at_step(step).into_iter().next_back()
     }

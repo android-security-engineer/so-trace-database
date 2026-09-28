@@ -303,6 +303,13 @@ enum QueryCmd {
         /// Step to reconstruct the value at
         step: u64,
     },
+    /// Instruction, register file, and this step's memory writes.
+    ///
+    /// One step. Does not take a register id or a memory address.
+    Snapshot {
+        /// Instruction step
+        step: u64,
+    },
     /// Reconstruct the full ARM64 register file at a given step.
     ///
     /// Returns every register's value at `step` in one snapshot (x0-x30, SP,
