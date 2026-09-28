@@ -48,9 +48,9 @@ export default function App() {
         <Content>
           <section className="site-hero" id="hero">
             <div>
-              <Title level={1}>把 SO 跑起来才出现的行为存下来，再查回去。</Title>
+              <Title level={1}>纯文本的 SO trace，收成可以查询的数据库。</Title>
               <Paragraph style={{ fontSize: 18, maxWidth: 560 }}>
-                SO Trace Database 是面向 Android 平台 SO（共享库）逆向分析的执行轨迹存储与查询数据库。它存在的原因，是分析人员要找回 SO 二进制本身没有的运行时行为。
+                对 SO，包括 VMP 加密的 SO 做 trace 时，输出通常是一大份纯文本日志。要在里面检索和分析不太方便。SO Trace Database 把这份纯文本变成结构化、可查询的数据库。
               </Paragraph>
               <Paragraph style={{ maxWidth: 560 }}>
                 它不是 trace 采集工具，不替代 Frida、Pin 或 DynamoRIO。它也不是符号执行框架。
@@ -62,30 +62,26 @@ export default function App() {
                 仓库
               </Button>
             </div>
-            <div className="trace-ledger" aria-label="一条示意轨迹">
+            <div className="trace-ledger" aria-label="纯文本日志和结构化记录">
               <table>
                 <thead>
                   <tr>
-                    <th>步</th>
-                    <th>地址</th>
-                    <th>记录</th>
+                    <th>纯文本日志</th>
+                    <th>结构化记录</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr>
-                    <td>1</td>
-                    <td className="addr">0x1000</td>
-                    <td>进入 sotrace_runtime_mix</td>
+                    <td>pc=0x1000 bl</td>
+                    <td>指令</td>
                   </tr>
                   <tr>
-                    <td>1</td>
-                    <td className="addr">x0</td>
-                    <td>寄存器值只在执行后出现</td>
+                    <td>mem write 0x2000</td>
+                    <td>内存</td>
                   </tr>
                   <tr>
-                    <td>2</td>
-                    <td className="addr">0x1040</td>
-                    <td>内存写入，文件里没有这个立即数</td>
+                    <td>x0 = 返回值</td>
+                    <td>寄存器</td>
                   </tr>
                 </tbody>
               </table>
@@ -97,14 +93,14 @@ export default function App() {
           <section className="band band-rule" id="problem">
             <Title level={2}>问题</Title>
             <Paragraph style={{ fontSize: 18, maxWidth: 720 }}>
-              打开 SO 文件看不到运行时结果。反汇编只能给出静态指令和写进文件的常量。这次有没有走进某个分支、内存写成了什么、寄存器里最后是多少，都不在这份二进制里。
+              对 SO，包括 VMP 加密的 SO 做 trace，出来的往往是一大份纯文本日志。要在这种文本里检索和分析不太方便：想按指令、内存或寄存器把一次执行对上，只能自己翻行。
             </Paragraph>
           </section>
 
           <section className="band band-rule" id="fix">
             <Title level={2}>怎么解决</Title>
             <Paragraph style={{ fontSize: 18, maxWidth: 720 }}>
-              先把一次执行记成轨迹，用 trace-save 存进数据库。里面可以放下指令、内存和寄存器事件。然后再用 query 把已经存进轨迹的记录读回来，按地址或步号对上那一次运行。
+              把这份纯文本 trace 日志变成结构化、可查询的数据库，分析就不用在文本里翻。用 trace-save 存下指令、内存和寄存器记录，再用 query 把已经存好的一条记录读出来。
             </Paragraph>
           </section>
 
