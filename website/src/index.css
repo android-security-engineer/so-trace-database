@@ -111,6 +111,27 @@ body {
   margin: 8px 0;
 }
 
+.tag-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 20px 0 4px;
+}
+
+.tag-grid span {
+  padding: 6px 14px;
+  background: #ffffff;
+  border: 1px solid #d5ddd8;
+  border-radius: 2px;
+  font-size: 14px;
+}
+
+.tag-grid-accent span {
+  background: #1c2430;
+  color: #e7eee9;
+  border-color: #1c2430;
+}
+
 .install-fence {
   margin: 0;
   padding: 16px 18px;

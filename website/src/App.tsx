@@ -8,6 +8,52 @@ const install = `curl -fsSL -o sotrace https://github.com/android-security-engin
 chmod +x sotrace
 ./sotrace --help`
 
+const analyzeExample = `./sotrace analyze trace.json --only races
+./sotrace analyze trace.json --only deadlocks
+./sotrace analyze trace.json --only jni-boundary`
+
+const CONCURRENCY_DIMS = [
+  '竞态检测',
+  '死锁检测',
+  '锁争用',
+  '函数线程安全分类',
+  '线程-函数关联',
+  '跨线程数据流',
+  '生产者-消费者模式',
+  '调度与核心占用',
+  '线程生命周期',
+  '线程状态迁移',
+  '临界区持锁时长',
+  'JNI 边界跨越',
+]
+
+const ECOSYSTEM_TOOLS = [
+  'Frida',
+  'IDA',
+  'Ghidra',
+  'Binary Ninja',
+  'radare2',
+  'angr',
+  'Triton',
+  'DynamoRIO',
+  'Pin',
+  'QEMU',
+  'Qiling',
+  'unidbg',
+  'GDB',
+  'LLDB',
+  'strace',
+  'ltrace',
+  'Valgrind',
+  'ThreadSanitizer',
+  'apktool',
+  'jadx',
+  'dexdump',
+  'objdump',
+  'capstone',
+  'perf',
+]
+
 export default function App() {
   return (
     <ConfigProvider
@@ -35,6 +81,8 @@ export default function App() {
               { key: 'product', label: <a href="#hero">产品</a> },
               { key: 'problem', label: <a href="#problem">问题</a> },
               { key: 'fix', label: <a href="#fix">怎么解决</a> },
+              { key: 'concurrency', label: <a href="#concurrency">并发分析</a> },
+              { key: 'ecosystem', label: <a href="#ecosystem">生态</a> },
               { key: 'usage', label: <a href="#usage">用法</a> },
               { key: 'throughput', label: <a href="#throughput">吞吐</a> },
               { key: 'boundary', label: <a href="#boundary">边界</a> },
@@ -100,8 +148,36 @@ export default function App() {
           <section className="band band-rule" id="fix">
             <Title level={2}>怎么解决</Title>
             <Paragraph style={{ fontSize: 18, maxWidth: 720 }}>
-              把这份纯文本 trace 日志变成结构化、可查询的数据库，分析就不用在文本里翻。用 trace-save 存下指令、内存和寄存器记录，再用 query 把已经存好的一条记录读出来。
+              把这份纯文本 trace 日志变成结构化、可查询的数据库，分析就不用在文本里翻。用 trace-save 存下指令、内存和寄存器记录，再用 query 把已经存好的一条记录读出来，或者直接用 analyze 跑现成的分析。
             </Paragraph>
+            <Paragraph style={{ maxWidth: 720 }}>
+              同一份数据库有三条路进：本机命令行（已发布二进制，sotrace）、HTTP API Server（鉴权后对外提供服务，44 条路由）、MCP（35 个工具，给 Claude 这类 AI agent 直接查询，不用先学 API）。
+            </Paragraph>
+          </section>
+
+          <section className="band band-rule" id="concurrency">
+            <Title level={2}>多线程原生代码，直接问有没有问题</Title>
+            <Paragraph style={{ fontSize: 18, maxWidth: 720 }}>
+              反汇编看不出运行时线程之间实际发生了什么。指令、内存、寄存器和线程事件本来就在同一条时间线上，analyze 能直接跑 12 种分析，而不用自己在纯文本里对时间戳找竞态和死锁。
+            </Paragraph>
+            <div className="tag-grid tag-grid-accent" aria-label="12 种并发分析维度">
+              {CONCURRENCY_DIMS.map((dim) => (
+                <span key={dim}>{dim}</span>
+              ))}
+            </div>
+            <pre className="install-fence" style={{ marginTop: 20 }}>{analyzeExample}</pre>
+          </section>
+
+          <section className="band band-rule" id="ecosystem">
+            <Title level={2}>让整条工具链把数据推进来</Title>
+            <Paragraph style={{ fontSize: 18, maxWidth: 760 }}>
+              Frida 的动态调用、IDA/Ghidra/Binary Ninja/radare2 的静态符号、DynamoRIO/Pin/QEMU/Qiling/unidbg 的指令级或模拟执行、GDB/LLDB/strace/ltrace/Valgrind/ThreadSanitizer 的调试和系统调用事件，本来分别留在各自工具里。仓库自带 24 个插件，跑在对应工具内部，把各自输出转换后推给 sotrace-server，落进同一条时间线。
+            </Paragraph>
+            <div className="tag-grid" aria-label="24 个生态插件覆盖的工具">
+              {ECOSYSTEM_TOOLS.map((tool) => (
+                <span key={tool}>{tool}</span>
+              ))}
+            </div>
           </section>
 
           <section className="band band-rule" id="stores">
